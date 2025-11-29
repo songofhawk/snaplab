@@ -155,15 +155,18 @@ const detectAxis = (
         const variance = nonZeroScores.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / nonZeroScores.length;
         const stdDev = Math.sqrt(variance);
 
-        // Lower threshold slightly to catch subtle edges
-        const threshold = mean + 2.0 * stdDev;
+        // Significantly increased threshold to avoid splitting objects inside images
+        // Mean + 3.5 * StdDev targets only the most prominent lines
+        const threshold = mean + 3.5 * stdDev;
 
-        const minDistance = Math.max(20, limit / 50); // Reduced min distance
+        // Dynamic minimum distance: Assume grid items are not tiny.
+        // e.g. at most 10 items per axis -> min distance is 1/15 of total length
+        const minDistance = Math.max(50, limit / 15);
 
         for (let i = 1; i < limit - 1; i++) {
             if (smoothedScores[i] > threshold) {
                 let isMax = true;
-                const localCheck = 5;
+                const localCheck = 10; // Wider local check
                 const start = Math.max(0, i - localCheck);
                 const end = Math.min(limit, i + localCheck);
                 for (let k = start; k < end; k++) {
@@ -181,25 +184,48 @@ const detectAxis = (
         // Filter edges by distance
         const filteredEdges: number[] = [];
         if (edges.length > 0) {
-            filteredEdges.push(edges[0]);
-            for (let i = 1; i < edges.length; i++) {
-                if (edges[i] - filteredEdges[filteredEdges.length - 1] > minDistance) {
-                    filteredEdges.push(edges[i]);
-                }
+            // Sort by score to prefer stronger lines?
+            // No, we need spatial order. But we can greedily pick strongest in a window.
+            // For simplicity, let's stick to sequential but respect minDistance.
+
+            // Better approach: Iteratively pick the highest score, remove neighbors, repeat.
+            // This ensures we keep the "real" line and not a shadow, and don't skip a strong line just because a weak one came first.
+
+            let candidates = edges.map(idx => ({ idx, score: smoothedScores[idx] }));
+            candidates.sort((a, b) => b.score - a.score); // Sort by score desc
+
+            const selected: number[] = [];
+
+            while (candidates.length > 0) {
+                const best = candidates[0];
+                selected.push(best.idx);
+
+                // Remove all candidates too close to this one
+                candidates = candidates.filter(c => Math.abs(c.idx - best.idx) >= minDistance);
             }
+
+            filteredEdges.push(...selected.sort((a, b) => a - b));
         }
         edges.splice(0, edges.length, ...filteredEdges);
     }
 
     // --- Combine Results ---
-    // Prefer Gaps. If a Gap is found, ignore Edges that are close to it.
-    // If no Gap is close, include the Edge.
 
-    const finalSplits: number[] = [...gaps];
+    const finalSplits: number[] = [];
+    const margin = limit * 0.02; // Ignore splits within 2% of edges
 
+    // Add gaps first (highest confidence)
+    for (const gap of gaps) {
+        if (gap > margin && gap < limit - margin) {
+            finalSplits.push(gap);
+        }
+    }
+
+    // Add edges if not close to existing gaps
     for (const edge of edges) {
-        // Check if this edge is close to any existing gap split
-        const isDuplicate = gaps.some(gap => Math.abs(gap - edge) < 20);
+        if (edge <= margin || edge >= limit - margin) continue;
+
+        const isDuplicate = finalSplits.some(split => Math.abs(split - edge) < 20);
         if (!isDuplicate) {
             finalSplits.push(edge);
         }
