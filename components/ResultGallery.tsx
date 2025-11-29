@@ -1,0 +1,86 @@
+import React from 'react';
+import { Download, ArrowLeft, CheckCircle } from 'lucide-react';
+import { SplitImage } from '../types';
+
+interface ResultGalleryProps {
+  images: SplitImage[];
+  onReset: () => void;
+}
+
+export const ResultGallery: React.FC<ResultGalleryProps> = ({ images, onReset }) => {
+  
+  const downloadImage = (url: string, index: number) => {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `split-image-${index + 1}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const downloadAll = () => {
+    images.forEach((img, idx) => {
+        // Stagger downloads slightly to prevent browser blocking
+        setTimeout(() => downloadImage(img.url, idx), idx * 200);
+    });
+  };
+
+  return (
+    <div className="w-full max-w-6xl mx-auto p-4">
+      <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+            <CheckCircle className="text-green-400" />
+            Done! {images.length} Images Created
+          </h2>
+          <p className="text-slate-400 mt-1">Review and download your split images.</p>
+        </div>
+        <div className="flex gap-3">
+           <button 
+            onClick={onReset}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-slate-300 border border-slate-700 hover:bg-slate-800 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Start Over
+          </button>
+          <button 
+            onClick={downloadAll}
+            className="flex items-center gap-2 px-6 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold shadow-lg shadow-green-900/20 transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Download All
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        {images.map((img, index) => (
+          <div key={img.id} className="group relative bg-slate-900 border border-slate-800 rounded-xl overflow-hidden hover:border-cyan-500/50 transition-all hover:shadow-xl hover:shadow-cyan-900/20">
+            <div className="absolute top-2 left-2 bg-black/60 backdrop-blur px-2 py-1 rounded text-xs font-mono text-slate-300 z-10">
+              #{index + 1}
+            </div>
+            
+            <div className="h-64 w-full overflow-hidden bg-slate-950/50 flex items-center justify-center p-2">
+              <img 
+                src={img.url} 
+                alt={`Result ${index + 1}`} 
+                className="max-w-full max-h-full object-contain shadow-sm"
+              />
+            </div>
+
+            <div className="p-4 border-t border-slate-800 bg-slate-900/80 group-hover:bg-slate-800/80 transition-colors flex justify-between items-center">
+              <span className="text-xs text-slate-500">Height: {img.height}px</span>
+              <button 
+                onClick={() => downloadImage(img.url, index)}
+                className="p-2 rounded-full hover:bg-cyan-500/20 text-cyan-400 hover:text-cyan-300 transition-colors"
+                title="Download this image"
+              >
+                <Download className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
