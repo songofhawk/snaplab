@@ -1,5 +1,10 @@
 import { SplitDirection } from "../types";
 
+export interface DetectedSplits {
+    rowSplits: number[];
+    colSplits: number[];
+}
+
 /**
  * Detects split lines using local image processing algorithms (Canvas API).
  * Replaces the AI-based approach for faster and offline-capable splitting.
@@ -7,9 +12,8 @@ import { SplitDirection } from "../types";
 export const detectSeamsLocal = async (
     imageSrc: string,
     width: number,
-    height: number,
-    direction: SplitDirection = SplitDirection.HORIZONTAL
-): Promise<number[]> => {
+    height: number
+): Promise<DetectedSplits> => {
     return new Promise((resolve, reject) => {
         const img = new Image();
         img.crossOrigin = "Anonymous";
@@ -27,8 +31,11 @@ export const detectSeamsLocal = async (
 
                 ctx.drawImage(img, 0, 0, width, height);
                 const imageData = ctx.getImageData(0, 0, width, height);
-                const splits = processImageData(imageData, direction);
-                resolve(splits);
+
+                const rowSplits = detectAxis(imageData, SplitDirection.HORIZONTAL);
+                const colSplits = detectAxis(imageData, SplitDirection.VERTICAL);
+
+                resolve({ rowSplits, colSplits });
             } catch (err) {
                 reject(err);
             }
@@ -38,7 +45,7 @@ export const detectSeamsLocal = async (
     });
 };
 
-const processImageData = (
+const detectAxis = (
     imageData: ImageData,
     direction: SplitDirection
 ): number[] => {
@@ -55,11 +62,11 @@ const processImageData = (
     for (let i = 1; i < limit; i++) {
         let diffSum = 0;
 
-        // Optimization: Don't check every single pixel if image is huge
-        // But for accuracy on "visible boundaries", checking all is safer.
-        // We can skip alpha channel for now or assume opacity.
+        // Optimization: Sample pixels to improve performance on large images
+        // Step size of 2 or 4 is usually enough for visual boundaries
+        const step = 2;
 
-        for (let j = 0; j < crossLimit; j++) {
+        for (let j = 0; j < crossLimit; j += step) {
             const idx1 = isHorizontal
                 ? (i * width + j) * 4
                 : (j * width + i) * 4;
@@ -73,47 +80,54 @@ const processImageData = (
             const gDiff = Math.abs(data[idx1 + 1] - data[idx2 + 1]);
             const bDiff = Math.abs(data[idx1 + 2] - data[idx2 + 2]);
 
-            // We can weigh them or just sum
             diffSum += (rDiff + gDiff + bDiff);
         }
 
-        // Normalize by width/height to get average pixel difference
-        scores[i] = diffSum / crossLimit;
+        // Normalize
+        scores[i] = diffSum / (crossLimit / step);
     }
 
-    // 2. Detect Peaks
-    // A split line usually has a significantly higher difference than neighbors
-    // OR it is a "solid color line" which might have low difference internally but high difference at edges.
-    // Let's stick to "high difference" (Gradient) for now as it covers "visible boundaries".
+    // 2. Smooth the scores to reduce noise (like rain drops or texture)
+    // Simple moving average
+    const smoothedScores = [...scores];
+    const smoothWindow = 3;
+    for (let i = smoothWindow; i < limit - smoothWindow; i++) {
+        let sum = 0;
+        for (let k = -smoothWindow; k <= smoothWindow; k++) {
+            sum += scores[i + k];
+        }
+        smoothedScores[i] = sum / (2 * smoothWindow + 1);
+    }
 
-    // Heuristic: Calculate mean and standard deviation of scores to set a dynamic threshold
-    const nonZeroScores = scores.filter(s => s > 0);
+    // 3. Detect Peaks
+    const nonZeroScores = smoothedScores.filter(s => s > 0);
     if (nonZeroScores.length === 0) return [];
 
     const mean = nonZeroScores.reduce((a, b) => a + b, 0) / nonZeroScores.length;
     const variance = nonZeroScores.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / nonZeroScores.length;
     const stdDev = Math.sqrt(variance);
 
-    // Threshold: This is the tricky part. 
-    // If the image is very clean, boundaries are huge spikes.
-    // If the image is noisy, boundaries might be buried.
-    // Let's try Mean + 2 * StdDev as a starting point for "significant change".
-    const threshold = mean + 1.5 * stdDev;
+    // Threshold: Increased to avoid false positives in textured images
+    // Mean + 2.5 * StdDev is a strong filter for "outliers" (edges)
+    const threshold = mean + 2.5 * stdDev;
 
     const candidates: number[] = [];
 
-    // 3. Peak extraction with Non-Maximum Suppression window
-    const windowSize = 10; // Minimum distance between splits (pixels)
+    // 4. Peak extraction with Non-Maximum Suppression window
+    // Minimum distance between splits. 
+    // For a grid, splits are rarely closer than 5% of the total dimension or at least 40px.
+    const minDistance = Math.max(40, limit / 20);
 
     for (let i = 1; i < limit - 1; i++) {
-        if (scores[i] > threshold) {
-            // Check if it's a local maximum
+        if (smoothedScores[i] > threshold) {
+            // Check if it's a local maximum in a small neighborhood
             let isMax = true;
-            const start = Math.max(0, i - 5);
-            const end = Math.min(limit, i + 5);
+            const localCheck = 5;
+            const start = Math.max(0, i - localCheck);
+            const end = Math.min(limit, i + localCheck);
 
             for (let k = start; k < end; k++) {
-                if (scores[k] > scores[i]) {
+                if (smoothedScores[k] > smoothedScores[i]) {
                     isMax = false;
                     break;
                 }
@@ -121,7 +135,20 @@ const processImageData = (
 
             if (isMax) {
                 // Ensure we don't add points too close to existing ones
-                if (candidates.length === 0 || i - candidates[candidates.length - 1] > windowSize) {
+                // If close, keep the one with higher score
+                if (candidates.length > 0) {
+                    const lastIdx = candidates[candidates.length - 1];
+                    if (i - lastIdx < minDistance) {
+                        if (smoothedScores[i] > smoothedScores[lastIdx]) {
+                            // Replace the previous one because this one is stronger
+                            candidates.pop();
+                            candidates.push(i);
+                        }
+                        // Else: ignore this one, previous was stronger
+                    } else {
+                        candidates.push(i);
+                    }
+                } else {
                     candidates.push(i);
                 }
             }

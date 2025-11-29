@@ -12,9 +12,6 @@ const App: React.FC = () => {
   const [originalImageSrc, setOriginalImageSrc] = useState<string | null>(null);
   const [imageDimensions, setImageDimensions] = useState<Dimensions>({ width: 0, height: 0 });
 
-  // Split logic state
-  const [activeDirection, setActiveDirection] = useState<SplitDirection>(SplitDirection.HORIZONTAL);
-
   // Independent state for rows (y-coords) and cols (x-coords)
   const [rowSplits, setRowSplits] = useState<number[]>([]);
   const [colSplits, setColSplits] = useState<number[]>([]);
@@ -30,7 +27,6 @@ const App: React.FC = () => {
     setErrorMsg(null);
 
     // Reset state
-    setActiveDirection(SplitDirection.HORIZONTAL);
     setRowSplits([]);
     setColSplits([]);
 
@@ -40,8 +36,8 @@ const App: React.FC = () => {
       img.onload = () => {
         setImageDimensions({ width: img.width, height: img.height });
         setOriginalImageSrc(img.src);
-        // Initial process for the default direction (Rows)
-        processImage(img.src, img.width, img.height, SplitDirection.HORIZONTAL);
+        // Initial process
+        processImage(img.src, img.width, img.height);
       };
       img.onerror = () => {
         setErrorMsg("Failed to load image.");
@@ -55,19 +51,14 @@ const App: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
-  const processImage = async (src: string, w: number, h: number, dir: SplitDirection) => {
-    setLoadingMessage(dir === SplitDirection.HORIZONTAL
-      ? "Detecting rows..."
-      : "Detecting columns...");
+  const processImage = async (src: string, w: number, h: number) => {
+    setLoadingMessage("Detecting grid...");
 
     try {
-      const splits = await detectSeamsLocal(src, w, h, dir);
+      const { rowSplits, colSplits } = await detectSeamsLocal(src, w, h);
 
-      if (dir === SplitDirection.HORIZONTAL) {
-        setRowSplits(splits);
-      } else {
-        setColSplits(splits);
-      }
+      setRowSplits(rowSplits);
+      setColSplits(colSplits);
 
       setState(AppState.EDITOR);
     } catch (err) {
@@ -79,20 +70,9 @@ const App: React.FC = () => {
     }
   };
 
-  const handleDirectionChange = (newDirection: SplitDirection) => {
-    // Just switch the active tool mode, don't clear splits
-    setActiveDirection(newDirection);
-
-    // Optional: If the new direction has NO splits yet, maybe auto-run detection?
-    const hasSplits = newDirection === SplitDirection.HORIZONTAL ? rowSplits.length > 0 : colSplits.length > 0;
-    if (!hasSplits && originalImageSrc) {
-      processImage(originalImageSrc, imageDimensions.width, imageDimensions.height, newDirection);
-    }
-  };
-
   const handleReRunDetection = () => {
     if (originalImageSrc) {
-      processImage(originalImageSrc, imageDimensions.width, imageDimensions.height, activeDirection);
+      processImage(originalImageSrc, imageDimensions.width, imageDimensions.height);
     }
   };
 
@@ -161,7 +141,6 @@ const App: React.FC = () => {
     setColSplits([]);
     setResultImages([]);
     setErrorMsg(null);
-    setActiveDirection(SplitDirection.HORIZONTAL);
   };
 
   return (
@@ -215,11 +194,9 @@ const App: React.FC = () => {
                 dimensions={imageDimensions}
                 rowSplits={rowSplits}
                 colSplits={colSplits}
-                activeDirection={activeDirection}
                 onConfirm={executeSplits}
                 onCancel={handleReset}
                 onReRunDetection={handleReRunDetection}
-                onDirectionChange={handleDirectionChange}
                 onSplitsChange={(rows, cols) => {
                   setRowSplits(rows);
                   setColSplits(cols);
