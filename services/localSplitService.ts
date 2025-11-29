@@ -313,27 +313,89 @@ const detectAxis = (
         }
     }
 
+    // --- Method 4: Solid Line Detection ---
+    // Detects lines that are solid color but NOT background color (e.g. grid lines).
+
+    const solidLines: number[] = [];
+    const solidLineThreshold = 20; // Variance threshold for a "solid" line
+
+    for (let i = 0; i < limit; i++) {
+        // We already calculated variances in Method 1.
+        // If variance is low, it's a solid line.
+        // Check if it's background color.
+
+        if (variances[i] < solidLineThreshold) {
+            // Check if it matches background color
+            // We need the average color of this line
+            let rSum = 0, gSum = 0, bSum = 0, count = 0;
+            const step = 4;
+            for (let j = 0; j < crossLimit; j += step) {
+                const idx = isHorizontal ? (i * width + j) * 4 : (j * width + i) * 4;
+                rSum += data[idx];
+                gSum += data[idx + 1];
+                bSum += data[idx + 2];
+                count++;
+            }
+            const rAvg = rSum / count;
+            const gAvg = gSum / count;
+            const bAvg = bSum / count;
+
+            const isBg = Math.abs(rAvg - bgColor.r) < bgThreshold &&
+                Math.abs(gAvg - bgColor.g) < bgThreshold &&
+                Math.abs(bAvg - bgColor.b) < bgThreshold;
+
+            if (!isBg) {
+                // It's a solid line, but not background. Likely a grid line.
+                // Check if it's "darker" or "significant"?
+                // Usually grid lines are visible.
+                solidLines.push(i);
+            }
+        }
+    }
+
+    // Group adjacent solid lines
+    const mergedSolidLines: number[] = [];
+    if (solidLines.length > 0) {
+        let start = solidLines[0];
+        let prev = solidLines[0];
+        for (let i = 1; i < solidLines.length; i++) {
+            if (solidLines[i] - prev > 1) {
+                mergedSolidLines.push(Math.floor((start + prev) / 2));
+                start = solidLines[i];
+            }
+            prev = solidLines[i];
+        }
+        mergedSolidLines.push(Math.floor((start + prev) / 2));
+    }
+
     // --- Combine & Filter Results ---
 
     // 1. Collect ALL candidates with their "strength" (score)
-    // We assign arbitrary scores: BgGap = 100, Gap = 50, Edge = Score
+    // We assign arbitrary scores: Solid = 200, BgGap = 100, Gap = 50, Edge = Score
 
     interface Candidate {
         pos: number;
         score: number;
-        type: 'bg' | 'gap' | 'edge';
+        type: 'solid' | 'bg' | 'gap' | 'edge';
     }
 
     let candidates: Candidate[] = [];
 
+    // Add Solid Lines (Highest Priority for Grids)
+    for (const line of mergedSolidLines) {
+        candidates.push({ pos: line, score: 200, type: 'solid' });
+    }
+
     // Add Bg Gaps
     for (const gap of bgGaps) {
-        candidates.push({ pos: gap, score: 100, type: 'bg' });
+        // Avoid duplicates
+        if (!candidates.some(c => Math.abs(c.pos - gap) < 10)) {
+            candidates.push({ pos: gap, score: 100, type: 'bg' });
+        }
     }
 
     // Add Variance Gaps
     for (const gap of gaps) {
-        // Avoid duplicates
         if (!candidates.some(c => Math.abs(c.pos - gap) < 10)) {
             candidates.push({ pos: gap, score: 50, type: 'gap' });
         }
@@ -377,9 +439,13 @@ const detectAxis = (
         const tolerance = limit * 0.05; // 5% tolerance
         const clusters: { val: number, count: number, members: number[] }[] = [];
 
+        // Ignore small distances (e.g. text lines)
+        // Assume grid items are at least 1/10 of the image
+        const minGridSize = limit / 10;
+
         for (const d of distances) {
             // Ignore very small distances (noise)
-            if (d < limit / 20) continue;
+            if (d < minGridSize) continue;
 
             let found = false;
             for (const c of clusters) {
@@ -413,7 +479,10 @@ const detectAxis = (
                 const multiple = Math.round(c.pos / baseUnit);
                 const expected = multiple * baseUnit;
 
-                if (Math.abs(c.pos - expected) < tolerance) {
+                // Stricter check for weak signals (edges), looser for strong signals (solid/bg)
+                const localTolerance = (c.type === 'solid' || c.type === 'bg') ? tolerance * 1.5 : tolerance;
+
+                if (Math.abs(c.pos - expected) < localTolerance) {
                     validCandidates.push(c);
                 }
             }
