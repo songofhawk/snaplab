@@ -313,56 +313,134 @@ const detectAxis = (
         }
     }
 
-    // --- Combine Results ---
+    // --- Combine & Filter Results ---
 
-    const finalSplits: number[] = [];
-    const margin = limit * 0.02;
+    // 1. Collect ALL candidates with their "strength" (score)
+    // We assign arbitrary scores: BgGap = 100, Gap = 50, Edge = Score
 
-    // Strategy: 
-    // 1. If we found Background Gaps, they are the Strongest signal. Use them.
-    // 2. If Background Gaps are found, we might NOT need Gradient edges (unless they are far from gaps).
-    // 3. If NO Background Gaps are found (e.g. seamless stitch), rely on Gradient/Variance Gaps.
+    interface Candidate {
+        pos: number;
+        score: number;
+        type: 'bg' | 'gap' | 'edge';
+    }
 
-    const useBgGaps = bgGaps.length > 0;
+    let candidates: Candidate[] = [];
 
-    // Add Background Gaps
+    // Add Bg Gaps
     for (const gap of bgGaps) {
-        if (gap > margin && gap < limit - margin) {
-            finalSplits.push(gap);
-        }
+        candidates.push({ pos: gap, score: 100, type: 'bg' });
     }
 
-    // If we have BG gaps, we are strict about adding other types
-    // Only add Variance Gaps if they are far from BG gaps
+    // Add Variance Gaps
     for (const gap of gaps) {
-        if (gap <= margin || gap >= limit - margin) continue;
-
-        const isDuplicate = finalSplits.some(split => Math.abs(split - gap) < 20);
-        if (!isDuplicate) {
-            // If we have BG gaps, only add this if it's really distinct? 
-            // Actually, Variance Gaps usually overlap with BG gaps. 
-            // If Variance Gap exists but BG Gap doesn't, it means it's a "low variance" area that isn't "background color".
-            // e.g. a solid dark bar in a white background. This is a valid split.
-            finalSplits.push(gap);
+        // Avoid duplicates
+        if (!candidates.some(c => Math.abs(c.pos - gap) < 10)) {
+            candidates.push({ pos: gap, score: 50, type: 'gap' });
         }
     }
 
-    // Add Edges (Gradient) - Lowest priority
-    // Only if we haven't found enough splits? Or just standard de-dupe.
-    // If we found BG gaps, edges inside content are likely noise.
-    // So we increase minDistance for edges if we have BG gaps.
-
+    // Add Edges
     for (const edge of edges) {
-        if (edge <= margin || edge >= limit - margin) continue;
-
-        const isDuplicate = finalSplits.some(split => Math.abs(split - edge) < 20);
-        if (!isDuplicate) {
-            // Extra check: If we have BG gaps, implies a grid structure.
-            // Don't add random edges unless they are strong?
-            // For now, just add them, but the high threshold in Gradient detection should filter noise.
-            finalSplits.push(edge);
+        if (!candidates.some(c => Math.abs(c.pos - edge) < 10)) {
+            // Use the smoothed score as strength
+            candidates.push({ pos: edge, score: smoothedScores[edge], type: 'edge' });
         }
     }
 
-    return finalSplits.sort((a, b) => a - b);
+    // Sort by position
+    candidates.sort((a, b) => a.pos - b.pos);
+
+    // Filter out edges too close to borders
+    const margin = limit * 0.02;
+    candidates = candidates.filter(c => c.pos > margin && c.pos < limit - margin);
+
+    // --- Grid Regularity Filter ---
+    // If we have many candidates, try to find a regular pattern.
+
+    if (candidates.length > 2) {
+        // 1. Calculate all mutual distances between candidates
+        // We are looking for a "Base Unit"
+        const distances: number[] = [];
+
+        // Add distance from start (0) to first candidate?
+        // Yes, grid usually starts from top/left
+        distances.push(candidates[0].pos);
+
+        for (let i = 0; i < candidates.length - 1; i++) {
+            distances.push(candidates[i + 1].pos - candidates[i].pos);
+        }
+
+        // Also check distance from last to end?
+        // distances.push(limit - candidates[candidates.length-1].pos);
+
+        // 2. Find the Mode (most common distance) with tolerance
+        const tolerance = limit * 0.05; // 5% tolerance
+        const clusters: { val: number, count: number, members: number[] }[] = [];
+
+        for (const d of distances) {
+            // Ignore very small distances (noise)
+            if (d < limit / 20) continue;
+
+            let found = false;
+            for (const c of clusters) {
+                if (Math.abs(c.val - d) < tolerance) {
+                    c.count++;
+                    c.members.push(d);
+                    // Update average val
+                    c.val = c.members.reduce((a, b) => a + b, 0) / c.members.length;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                clusters.push({ val: d, count: 1, members: [d] });
+            }
+        }
+
+        // Sort clusters by count (desc)
+        clusters.sort((a, b) => b.count - a.count);
+
+        if (clusters.length > 0 && clusters[0].count >= 2) {
+            // We found a pattern!
+            const baseUnit = clusters[0].val;
+
+            // Filter candidates that fit into the grid (approx multiples of baseUnit)
+            // We anchor at 0.
+            const validCandidates: Candidate[] = [];
+
+            for (const c of candidates) {
+                // Check if pos is close to N * baseUnit
+                const multiple = Math.round(c.pos / baseUnit);
+                const expected = multiple * baseUnit;
+
+                if (Math.abs(c.pos - expected) < tolerance) {
+                    validCandidates.push(c);
+                }
+            }
+
+            // If we filtered too aggressively and lost almost everything, revert?
+            // Only apply if we kept at least some structure.
+            if (validCandidates.length > 0) {
+                candidates = validCandidates;
+            }
+        }
+    }
+
+    // Final cleanup: Remove duplicates that might still exist (if any)
+    // and sort by position
+    const finalSplits = candidates.map(c => c.pos).sort((a, b) => a - b);
+
+    // Ensure min distance between final splits
+    const minFinalDist = Math.max(40, limit / 20);
+    const result: number[] = [];
+    if (finalSplits.length > 0) {
+        result.push(finalSplits[0]);
+        for (let i = 1; i < finalSplits.length; i++) {
+            if (finalSplits[i] - result[result.length - 1] > minFinalDist) {
+                result.push(finalSplits[i]);
+            }
+        }
+    }
+
+    return result;
 };
