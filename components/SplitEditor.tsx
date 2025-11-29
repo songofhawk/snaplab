@@ -181,19 +181,29 @@ export const SplitEditor: React.FC<SplitEditorProps> = ({
                      ${isDraggingThis ? 'bg-yellow-400' : 'bg-red-500 group-hover:bg-yellow-400'}
                    `}
                 />
+                {/* 可拖拽区域 */}
                 <div
-                  className="absolute left-0 -top-[11px] w-full h-6 cursor-row-resize z-30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="absolute left-0 -top-[11px] w-full h-6 cursor-row-resize z-30"
                   onMouseDown={(e) => handleMouseDown(e, 'row', index)}
+                />
+                {/* 删除按钮 - 左侧 */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); removeSplit('row', index); }}
+                  className="absolute left-2 -top-[11px] bg-red-600 text-white rounded-full p-1 shadow-lg transform hover:scale-110 opacity-0 group-hover:opacity-100 transition-opacity z-40"
+                  title="Remove this split line"
                 >
-                  <button
-                    onClick={(e) => { e.stopPropagation(); removeSplit('row', index); }}
-                    className="bg-red-600 text-white rounded-full p-1 shadow-lg transform hover:scale-110"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                </div>
+                  <Trash2 className="w-3 h-3" />
+                </button>
+                {/* 删除按钮 - 右侧 */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); removeSplit('row', index); }}
+                  className="absolute right-2 -top-[11px] bg-red-600 text-white rounded-full p-1 shadow-lg transform hover:scale-110 opacity-0 group-hover:opacity-100 transition-opacity z-40"
+                  title="Remove this split line"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
                 {/* Label */}
-                <div className={`absolute left-2 -top-5 bg-red-900/80 text-[10px] text-red-100 px-1 rounded pointer-events-none whitespace-nowrap ${isDraggingThis ? 'block' : 'hidden group-hover:block'}`}>
+                <div className={`absolute left-1/2 -translate-x-1/2 -top-5 bg-red-900/80 text-[10px] text-red-100 px-1 rounded pointer-events-none whitespace-nowrap ${isDraggingThis ? 'block' : 'hidden group-hover:block'}`}>
                   Y: {val}px
                 </div>
               </div>
@@ -216,19 +226,29 @@ export const SplitEditor: React.FC<SplitEditorProps> = ({
                      ${isDraggingThis ? 'bg-cyan-300' : 'bg-blue-500 group-hover:bg-cyan-300'}
                    `}
                 />
+                {/* 可拖拽区域 */}
                 <div
-                  className="absolute top-0 -left-[11px] h-full w-6 cursor-col-resize z-30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="absolute top-0 -left-[11px] h-full w-6 cursor-col-resize z-30"
                   onMouseDown={(e) => handleMouseDown(e, 'col', index)}
+                />
+                {/* 删除按钮 - 顶部 */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); removeSplit('col', index); }}
+                  className="absolute top-2 -left-[11px] bg-blue-600 text-white rounded-full p-1 shadow-lg transform hover:scale-110 opacity-0 group-hover:opacity-100 transition-opacity z-40"
+                  title="Remove this split line"
                 >
-                  <button
-                    onClick={(e) => { e.stopPropagation(); removeSplit('col', index); }}
-                    className="bg-blue-600 text-white rounded-full p-1 shadow-lg transform hover:scale-110"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                </div>
+                  <Trash2 className="w-3 h-3" />
+                </button>
+                {/* 删除按钮 - 底部 */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); removeSplit('col', index); }}
+                  className="absolute bottom-2 -left-[11px] bg-blue-600 text-white rounded-full p-1 shadow-lg transform hover:scale-110 opacity-0 group-hover:opacity-100 transition-opacity z-40"
+                  title="Remove this split line"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
                 {/* Label */}
-                <div className={`absolute top-2 -left-2 bg-blue-900/80 text-[10px] text-blue-100 px-1 rounded pointer-events-none whitespace-nowrap ${isDraggingThis ? 'block' : 'hidden group-hover:block'}`}>
+                <div className={`absolute top-2 left-2 bg-blue-900/80 text-[10px] text-blue-100 px-1 rounded pointer-events-none whitespace-nowrap ${isDraggingThis ? 'block' : 'hidden group-hover:block'}`}>
                   X: {val}px
                 </div>
               </div>

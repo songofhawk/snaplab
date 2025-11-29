@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Upload, Image as ImageIcon, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Upload, Image as ImageIcon, AlertCircle, Clipboard } from 'lucide-react';
 
 interface ImageUploaderProps {
   onImageSelected: (file: File) => void;
@@ -8,6 +8,29 @@ interface ImageUploaderProps {
 export const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 监听粘贴事件
+  useEffect(() => {
+    const handlePaste = async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (file) {
+            validateAndPass(file);
+          }
+          break;
+        }
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -24,7 +47,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected })
   const validateAndPass = (file: File | undefined) => {
     setError(null);
     if (!file) return;
-    
+
     if (!file.type.startsWith('image/')) {
       setError("Please upload a valid image file (PNG, JPG, WebP).");
       return;
@@ -37,8 +60,8 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected })
     <div className="w-full max-w-2xl mx-auto">
       <div
         className={`relative border-2 border-dashed rounded-2xl p-10 transition-all duration-300 text-center cursor-pointer group
-          ${isDragging 
-            ? 'border-cyan-400 bg-cyan-950/30' 
+          ${isDragging
+            ? 'border-cyan-400 bg-cyan-950/30'
             : 'border-slate-600 hover:border-slate-400 hover:bg-slate-800/50 bg-slate-900/50'
           }
         `}
@@ -54,7 +77,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected })
           accept="image/*"
           onChange={handleFileChange}
         />
-        
+
         <div className="flex flex-col items-center justify-center gap-4">
           <div className="p-4 rounded-full bg-slate-800 group-hover:bg-slate-700 transition-colors">
             <Upload className="w-10 h-10 text-cyan-400" />
@@ -64,12 +87,15 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected })
               Upload Stitched Image
             </h3>
             <p className="text-slate-400">
-              Click to browse or drag & drop
+              Click to browse, drag & drop, or press <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-xs">Ctrl+V</kbd> to paste
             </p>
           </div>
           <div className="flex gap-4 text-xs text-slate-500 mt-2">
             <span className="flex items-center gap-1">
               <ImageIcon className="w-3 h-3" /> PNG, JPG, WEBP
+            </span>
+            <span className="flex items-center gap-1">
+              <Clipboard className="w-3 h-3" /> Paste from clipboard
             </span>
           </div>
         </div>
