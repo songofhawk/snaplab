@@ -380,21 +380,28 @@ const detectAxis = (
 
     let candidates: Candidate[] = [];
 
-    // ONLY use strong signals
-    for (const line of mergedSolidLines) {
-        candidates.push({ pos: line, score: 200, type: 'solid' });
-    }
+    // STRATEGY: Background Gaps are the MOST reliable signal for spaced grids.
+    // If we found any, use ONLY those. Ignore everything else.
+    // Solid lines are prone to false positives (text/icon internals).
 
-    for (const gap of bgGaps) {
-        if (!candidates.some(c => Math.abs(c.pos - gap) < 10)) {
+    const hasBgGaps = bgGaps.length > 0;
+
+    if (hasBgGaps) {
+        // Use ONLY background gaps
+        for (const gap of bgGaps) {
             candidates.push({ pos: gap, score: 100, type: 'bg' });
         }
-    }
+    } else {
+        // Fallback: Use solid lines if no background gaps
+        for (const line of mergedSolidLines) {
+            candidates.push({ pos: line, score: 200, type: 'solid' });
+        }
 
-    // Only add variance gaps if we have NO strong signals
-    if (candidates.length === 0) {
-        for (const gap of gaps) {
-            candidates.push({ pos: gap, score: 50, type: 'gap' });
+        // If still no candidates, use variance gaps as last resort
+        if (candidates.length === 0) {
+            for (const gap of gaps) {
+                candidates.push({ pos: gap, score: 50, type: 'gap' });
+            }
         }
     }
 
@@ -428,7 +435,7 @@ const detectAxis = (
             distances.push(candidates[i + 1].pos - candidates[i].pos);
         }
 
-        const tolerance = limit * 0.08; // Slightly more lenient
+        const tolerance = limit * 0.08;
         const clusters: { val: number, count: number, members: number[] }[] = [];
 
         for (const d of distances) {
