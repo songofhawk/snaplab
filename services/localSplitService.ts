@@ -313,42 +313,54 @@ const detectAxis = (
         }
     }
 
-    // --- Method 4: Solid Line Detection ---
-    // Detects lines that are solid color but NOT background color (e.g. grid lines).
+    // --- Method 4: Solid Line Detection with Color Complexity Check ---
+    // Detects lines that are solid color but NOT background color.
+    // CRITICAL: Filter out lines that pass through text/icons by checking "Color Complexity".
+    // A true split line should have very few unique colors (background + line color + maybe 1-2 anti-aliasing shades).
+    // A line passing through text will have many shades due to anti-aliasing and complex shapes.
 
     const solidLines: number[] = [];
-    const solidLineThreshold = 20; // Variance threshold for a "solid" line
+    const solidLineThreshold = 50; // Relaxed variance threshold, we rely on complexity check
 
     for (let i = 0; i < limit; i++) {
-        // We already calculated variances in Method 1.
-        // If variance is low, it's a solid line.
-        // Check if it's background color.
-
         if (variances[i] < solidLineThreshold) {
-            // Check if it matches background color
-            // We need the average color of this line
+            // Check Color Complexity
+            // Count unique quantized colors in this line
+            const uniqueColors = new Set<string>();
             let rSum = 0, gSum = 0, bSum = 0, count = 0;
-            const step = 4;
+
+            const step = 2; // Check more pixels for accuracy
             for (let j = 0; j < crossLimit; j += step) {
                 const idx = isHorizontal ? (i * width + j) * 4 : (j * width + i) * 4;
-                rSum += data[idx];
-                gSum += data[idx + 1];
-                bSum += data[idx + 2];
+                const r = data[idx];
+                const g = data[idx + 1];
+                const b = data[idx + 2];
+
+                // Quantize to reduce noise (e.g. 16 levels)
+                const key = `${Math.floor(r / 16)},${Math.floor(g / 16)},${Math.floor(b / 16)}`;
+                uniqueColors.add(key);
+
+                rSum += r; gSum += g; bSum += b;
                 count++;
             }
-            const rAvg = rSum / count;
-            const gAvg = gSum / count;
-            const bAvg = bSum / count;
 
-            const isBg = Math.abs(rAvg - bgColor.r) < bgThreshold &&
-                Math.abs(gAvg - bgColor.g) < bgThreshold &&
-                Math.abs(bAvg - bgColor.b) < bgThreshold;
+            // Threshold for unique colors. 
+            // Pure line on bg = 2 colors. With AA = maybe 4-5.
+            // Text line = many more.
+            if (uniqueColors.size <= 5) {
+                // It's a low-complexity line. 
+                // Now check if it's background.
+                const rAvg = rSum / count;
+                const gAvg = gSum / count;
+                const bAvg = bSum / count;
 
-            if (!isBg) {
-                // It's a solid line, but not background. Likely a grid line.
-                // Check if it's "darker" or "significant"?
-                // Usually grid lines are visible.
-                solidLines.push(i);
+                const isBg = Math.abs(rAvg - bgColor.r) < bgThreshold &&
+                    Math.abs(gAvg - bgColor.g) < bgThreshold &&
+                    Math.abs(bAvg - bgColor.b) < bgThreshold;
+
+                if (!isBg) {
+                    solidLines.push(i);
+                }
             }
         }
     }
@@ -370,9 +382,6 @@ const detectAxis = (
 
     // --- Combine & Filter Results ---
 
-    // 1. Collect ALL candidates with their "strength" (score)
-    // We assign arbitrary scores: Solid = 200, BgGap = 100, Gap = 50, Edge = Score
-
     interface Candidate {
         pos: number;
         score: number;
@@ -381,14 +390,13 @@ const detectAxis = (
 
     let candidates: Candidate[] = [];
 
-    // Add Solid Lines (Highest Priority for Grids)
+    // Add Solid Lines (Highest Priority)
     for (const line of mergedSolidLines) {
         candidates.push({ pos: line, score: 200, type: 'solid' });
     }
 
     // Add Bg Gaps
     for (const gap of bgGaps) {
-        // Avoid duplicates
         if (!candidates.some(c => Math.abs(c.pos - gap) < 10)) {
             candidates.push({ pos: gap, score: 100, type: 'bg' });
         }
@@ -402,10 +410,24 @@ const detectAxis = (
     }
 
     // Add Edges
+    // Also apply Color Complexity Check to Edges!
+    // If an edge has high color complexity, it's likely inside content.
     for (const edge of edges) {
         if (!candidates.some(c => Math.abs(c.pos - edge) < 10)) {
-            // Use the smoothed score as strength
-            candidates.push({ pos: edge, score: smoothedScores[edge], type: 'edge' });
+            // Check complexity for edge too
+            const uniqueColors = new Set<string>();
+            const step = 4;
+            for (let j = 0; j < crossLimit; j += step) {
+                const idx = isHorizontal ? (edge * width + j) * 4 : (j * width + edge) * 4;
+                const key = `${Math.floor(data[idx] / 16)},${Math.floor(data[idx + 1] / 16)},${Math.floor(data[idx + 2] / 16)}`;
+                uniqueColors.add(key);
+            }
+
+            // Edges might be gradients, so complexity can be slightly higher.
+            // But if it's > 10, it's definitely content.
+            if (uniqueColors.size <= 8) {
+                candidates.push({ pos: edge, score: smoothedScores[edge], type: 'edge' });
+            }
         }
     }
 
