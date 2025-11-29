@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Download, ArrowLeft, CheckCircle, Copy, Check } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Download, ArrowLeft, CheckCircle, Copy, Check, X } from 'lucide-react';
 import { SplitImage } from '../types';
 
 interface ResultGalleryProps {
@@ -9,6 +9,18 @@ interface ResultGalleryProps {
 
 export const ResultGallery: React.FC<ResultGalleryProps> = ({ images, onReset }) => {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [previewImage, setPreviewImage] = useState<SplitImage | null>(null);
+
+  // 监听 ESC 键关闭预览
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setPreviewImage(null);
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, []);
 
   const downloadImage = (url: string, index: number) => {
     const a = document.createElement('a');
@@ -26,7 +38,8 @@ export const ResultGallery: React.FC<ResultGalleryProps> = ({ images, onReset })
     });
   };
 
-  const copyImageToClipboard = async (url: string, index: number) => {
+  const copyImageToClipboard = async (url: string, index: number, e: React.MouseEvent) => {
+    e.stopPropagation(); // 防止触发图片预览
     try {
       // 将 base64 URL 转换为 Blob
       const response = await fetch(url);
@@ -93,8 +106,8 @@ export const ResultGallery: React.FC<ResultGalleryProps> = ({ images, onReset })
 
             <div
               className="h-64 w-full overflow-hidden bg-slate-950/50 flex items-center justify-center p-2 cursor-pointer hover:bg-slate-900/50 transition-colors"
-              onClick={() => copyImageToClipboard(img.url, index)}
-              title="Click to copy to clipboard"
+              onClick={() => setPreviewImage(img)}
+              title="Click to preview"
             >
               <img
                 src={img.url}
@@ -107,7 +120,7 @@ export const ResultGallery: React.FC<ResultGalleryProps> = ({ images, onReset })
               <span className="text-xs text-slate-500">{img.width}×{img.height}px</span>
               <div className="flex gap-2">
                 <button
-                  onClick={() => copyImageToClipboard(img.url, index)}
+                  onClick={(e) => copyImageToClipboard(img.url, index, e)}
                   className="p-2 rounded-full hover:bg-cyan-500/20 text-cyan-400 hover:text-cyan-300 transition-colors"
                   title="Copy to clipboard"
                 >
@@ -129,6 +142,38 @@ export const ResultGallery: React.FC<ResultGalleryProps> = ({ images, onReset })
           </div>
         ))}
       </div>
+
+      {/* 图片预览模态框 */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={() => setPreviewImage(null)}
+        >
+          <button
+            onClick={() => setPreviewImage(null)}
+            className="absolute top-4 right-4 p-2 bg-slate-800 hover:bg-slate-700 text-white rounded-full transition-colors z-10"
+            title="Close (ESC)"
+          >
+            <X className="w-6 h-6" />
+          </button>
+
+          <div
+            className="relative max-w-[90vw] max-h-[90vh] p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={previewImage.url}
+              alt="Preview"
+              className="max-w-full max-h-[90vh] object-contain shadow-2xl rounded-lg"
+            />
+            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 rounded-b-lg">
+              <p className="text-white text-sm text-center">
+                {previewImage.width} × {previewImage.height}px
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
