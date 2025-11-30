@@ -1,7 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
-import ReactCrop, { Crop, PixelCrop } from 'react-image-crop';
+import ReactCrop, { Crop, PixelCrop, centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
-import { Crop as CropIcon, Maximize, Pen, Save, X, Check, RotateCcw, Type } from 'lucide-react';
+import {
+    Crop as CropIcon,
+    Maximize,
+    Pen,
+    Save,
+    RotateCcw,
+    Check,
+    RotateCw,
+    FlipHorizontal,
+    FlipVertical,
+    Undo2
+} from 'lucide-react';
 
 interface ImageEditorProps {
     imageSrc: string;
@@ -12,7 +23,12 @@ interface ImageEditorProps {
 type EditMode = 'CROP' | 'RESIZE' | 'ANNOTATE' | null;
 
 export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCancel }) => {
-    const [currentSrc, setCurrentSrc] = useState(imageSrc);
+    // History Stack
+    const [history, setHistory] = useState<string[]>([imageSrc]);
+    const [currentStep, setCurrentStep] = useState(0);
+
+    const currentSrc = history[currentStep];
+
     const [mode, setMode] = useState<EditMode>(null);
 
     // Crop State
@@ -35,6 +51,21 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
         const { width, height } = e.currentTarget;
         setResizeDims({ width, height });
         setCrop(undefined); // Reset crop on new image load
+    };
+
+    // --- History Helper ---
+    const pushToHistory = (newSrc: string) => {
+        const newHistory = history.slice(0, currentStep + 1);
+        newHistory.push(newSrc);
+        setHistory(newHistory);
+        setCurrentStep(newHistory.length - 1);
+    };
+
+    const handleUndo = () => {
+        if (currentStep > 0) {
+            setCurrentStep(currentStep - 1);
+            setMode(null); // Exit any active mode
+        }
     };
 
     // --- Crop Logic ---
@@ -60,8 +91,32 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
                 completedCrop.height * scaleY
             );
 
-            setCurrentSrc(canvas.toDataURL('image/png'));
+            pushToHistory(canvas.toDataURL('image/png'));
             setMode(null);
+        }
+    };
+
+    const setAspectCrop = (aspect: number | undefined) => {
+        if (!imgRef.current) return;
+        const { width, height } = imgRef.current;
+
+        if (aspect) {
+            const crop = centerCrop(
+                makeAspectCrop(
+                    {
+                        unit: '%',
+                        width: 90,
+                    },
+                    aspect,
+                    width,
+                    height
+                ),
+                width,
+                height
+            );
+            setCrop(crop);
+        } else {
+            setCrop(undefined);
         }
     };
 
@@ -80,6 +135,13 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
         }
     };
 
+    const setResizePercent = (percent: number) => {
+        if (!imgRef.current) return;
+        const w = Math.round(imgRef.current.naturalWidth * (percent / 100));
+        const h = Math.round(imgRef.current.naturalHeight * (percent / 100));
+        setResizeDims({ width: w, height: h });
+    };
+
     const applyResize = () => {
         if (!imgRef.current) return;
         const canvas = document.createElement('canvas');
@@ -89,9 +151,47 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
         if (!ctx) return;
 
         ctx.drawImage(imgRef.current, 0, 0, resizeDims.width, resizeDims.height);
-        setCurrentSrc(canvas.toDataURL('image/png'));
+        pushToHistory(canvas.toDataURL('image/png'));
         setMode(null);
     };
+
+    // --- Rotate / Flip Logic ---
+    const rotateImage = () => {
+        if (!imgRef.current) return;
+        const canvas = document.createElement('canvas');
+        // Swap width and height for 90deg rotation
+        canvas.width = imgRef.current.naturalHeight;
+        canvas.height = imgRef.current.naturalWidth;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate(90 * Math.PI / 180);
+        ctx.drawImage(imgRef.current, -imgRef.current.naturalWidth / 2, -imgRef.current.naturalHeight / 2);
+
+        pushToHistory(canvas.toDataURL('image/png'));
+    };
+
+    const flipImage = (direction: 'horizontal' | 'vertical') => {
+        if (!imgRef.current) return;
+        const canvas = document.createElement('canvas');
+        canvas.width = imgRef.current.naturalWidth;
+        canvas.height = imgRef.current.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        if (direction === 'horizontal') {
+            ctx.translate(canvas.width, 0);
+            ctx.scale(-1, 1);
+        } else {
+            ctx.translate(0, canvas.height);
+            ctx.scale(1, -1);
+        }
+
+        ctx.drawImage(imgRef.current, 0, 0);
+        pushToHistory(canvas.toDataURL('image/png'));
+    };
+
 
     // --- Annotate Logic ---
     // Initialize canvas for annotation when mode starts
@@ -153,7 +253,7 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
 
     const applyAnnotation = () => {
         if (canvasRef.current) {
-            setCurrentSrc(canvasRef.current.toDataURL('image/png'));
+            pushToHistory(canvasRef.current.toDataURL('image/png'));
             setMode(null);
         }
     };
@@ -188,10 +288,45 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
                         >
                             <Pen className="w-5 h-5" />
                         </button>
+
+                        <div className="h-6 w-px bg-slate-700 mx-2"></div>
+
+                        <button
+                            onClick={rotateImage}
+                            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                            title="Rotate 90°"
+                        >
+                            <RotateCw className="w-5 h-5" />
+                        </button>
+                        <button
+                            onClick={() => flipImage('horizontal')}
+                            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                            title="Flip Horizontal"
+                        >
+                            <FlipHorizontal className="w-5 h-5" />
+                        </button>
+                        <button
+                            onClick={() => flipImage('vertical')}
+                            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                            title="Flip Vertical"
+                        >
+                            <FlipVertical className="w-5 h-5" />
+                        </button>
                     </div>
                 </div>
 
                 <div className="flex items-center gap-3">
+                    <button
+                        onClick={handleUndo}
+                        disabled={currentStep === 0}
+                        className={`p-2 rounded-lg transition-colors flex items-center gap-2 ${currentStep === 0 ? 'text-slate-600 cursor-not-allowed' : 'text-slate-300 hover:text-white hover:bg-slate-800'}`}
+                        title="Undo"
+                    >
+                        <Undo2 className="w-5 h-5" />
+                        <span className="text-sm">Undo</span>
+                    </button>
+                    <div className="h-6 w-px bg-slate-700 mx-2"></div>
+
                     <button
                         onClick={onCancel}
                         className="px-4 py-2 text-slate-300 hover:text-white font-medium"
@@ -213,38 +348,55 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
 
                 {/* Mode Specific Controls Overlay */}
                 {mode === 'RESIZE' && (
-                    <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900 border border-slate-700 p-4 rounded-xl shadow-xl flex items-center gap-4">
-                        <div className="flex flex-col gap-1">
-                            <label className="text-xs text-slate-400">Width</label>
-                            <input
-                                type="number"
-                                value={resizeDims.width}
-                                onChange={(e) => handleResizeChange(e, 'width')}
-                                className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white w-24"
-                            />
+                    <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900 border border-slate-700 p-4 rounded-xl shadow-xl flex flex-col gap-4">
+                        <div className="flex items-center gap-4">
+                            <div className="flex flex-col gap-1">
+                                <label className="text-xs text-slate-400">Width</label>
+                                <input
+                                    type="number"
+                                    value={resizeDims.width}
+                                    onChange={(e) => handleResizeChange(e, 'width')}
+                                    className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white w-24"
+                                />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                                <label className="text-xs text-slate-400">Height</label>
+                                <input
+                                    type="number"
+                                    value={resizeDims.height}
+                                    onChange={(e) => handleResizeChange(e, 'height')}
+                                    className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white w-24"
+                                />
+                            </div>
+                            <div className="flex items-center gap-2 pt-4">
+                                <input
+                                    type="checkbox"
+                                    checked={maintainAspect}
+                                    onChange={(e) => setMaintainAspect(e.target.checked)}
+                                    id="aspect"
+                                />
+                                <label htmlFor="aspect" className="text-sm text-slate-300">Lock Ratio</label>
+                            </div>
                         </div>
-                        <div className="flex flex-col gap-1">
-                            <label className="text-xs text-slate-400">Height</label>
-                            <input
-                                type="number"
-                                value={resizeDims.height}
-                                onChange={(e) => handleResizeChange(e, 'height')}
-                                className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white w-24"
-                            />
+
+                        {/* Presets */}
+                        <div className="flex gap-2 justify-center border-t border-slate-800 pt-3">
+                            {[25, 50, 75, 100].map(pct => (
+                                <button
+                                    key={pct}
+                                    onClick={() => setResizePercent(pct)}
+                                    className="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded"
+                                >
+                                    {pct}%
+                                </button>
+                            ))}
                         </div>
-                        <div className="flex items-center gap-2 pt-4">
-                            <input
-                                type="checkbox"
-                                checked={maintainAspect}
-                                onChange={(e) => setMaintainAspect(e.target.checked)}
-                                id="aspect"
-                            />
-                            <label htmlFor="aspect" className="text-sm text-slate-300">Lock Ratio</label>
+
+                        <div className="w-full">
+                            <button onClick={applyResize} className="w-full p-2 bg-cyan-600 rounded-lg text-white hover:bg-cyan-500 flex justify-center items-center gap-2">
+                                <Check className="w-4 h-4" /> Apply Resize
+                            </button>
                         </div>
-                        <div className="h-8 w-px bg-slate-700 mx-2"></div>
-                        <button onClick={applyResize} className="p-2 bg-cyan-600 rounded-lg text-white hover:bg-cyan-500">
-                            <Check className="w-4 h-4" />
-                        </button>
                     </div>
                 )}
 
@@ -272,11 +424,20 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
                 )}
 
                 {mode === 'CROP' && (
-                    <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900 border border-slate-700 p-2 rounded-xl shadow-xl flex items-center gap-2">
-                        <span className="text-sm text-slate-300 px-2">Drag to crop</span>
-                        <button onClick={applyCrop} className="p-2 bg-cyan-600 rounded-lg text-white hover:bg-cyan-500">
-                            <Check className="w-4 h-4" />
-                        </button>
+                    <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900 border border-slate-700 p-2 rounded-xl shadow-xl flex flex-col gap-2">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm text-slate-300 px-2">Drag to crop</span>
+                            <button onClick={applyCrop} className="p-2 bg-cyan-600 rounded-lg text-white hover:bg-cyan-500">
+                                <Check className="w-4 h-4" />
+                            </button>
+                        </div>
+                        {/* Aspect Ratio Presets */}
+                        <div className="flex gap-1 border-t border-slate-800 pt-2">
+                            <button onClick={() => setAspectCrop(undefined)} className="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded">Free</button>
+                            <button onClick={() => setAspectCrop(1)} className="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded">1:1</button>
+                            <button onClick={() => setAspectCrop(4 / 3)} className="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded">4:3</button>
+                            <button onClick={() => setAspectCrop(16 / 9)} className="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded">16:9</button>
+                        </div>
                     </div>
                 )}
 
