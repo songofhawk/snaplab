@@ -14,9 +14,11 @@ import {
     Undo2,
     Eraser,
     Wand2,
-    Sparkles
+    Sparkles,
+    Scan
 } from 'lucide-react';
 import { floodFill, removeBackgroundAuto } from '../services/imageProcessing';
+import { loadSAMModel, computeEmbeddings, generateMask } from '../services/samService';
 
 interface ImageEditorProps {
     imageSrc: string;
@@ -24,7 +26,7 @@ interface ImageEditorProps {
     onCancel: () => void;
 }
 
-type EditMode = 'CROP' | 'RESIZE' | 'ANNOTATE' | 'BACKGROUND' | null;
+type EditMode = 'CROP' | 'RESIZE' | 'ANNOTATE' | 'BACKGROUND' | 'SEGMENT' | null;
 
 export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCancel }) => {
     // History Stack
@@ -35,6 +37,7 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
 
     const [mode, setMode] = useState<EditMode>(null);
     const [isLoading, setIsLoading] = useState(false);
+    const [loadingText, setLoadingText] = useState<string | null>(null);
 
     // Crop State
     const [crop, setCrop] = useState<Crop>();
@@ -55,11 +58,21 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
     const [bgTool, setBgTool] = useState<'magic' | null>(null);
     const [tolerance, setTolerance] = useState(30);
 
+    // Segment State
+    const [samPoints, setSamPoints] = useState<{ x: number, y: number, label: number }[]>([]);
+    const [samMask, setSamMask] = useState<{ data: Float32Array | any, width: number, height: number } | null>(null);
+    const [isSamReady, setIsSamReady] = useState(false);
+
     // Initialize resize dims when image loads
     const onImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
         const { width, height } = e.currentTarget;
         setResizeDims({ width, height });
         setCrop(undefined); // Reset crop on new image load
+
+        // Reset SAM state on new image
+        setSamPoints([]);
+        setSamMask(null);
+        setIsSamReady(false);
     };
 
     // --- History Helper ---
@@ -74,6 +87,8 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
         if (currentStep > 0) {
             setCurrentStep(currentStep - 1);
             setMode(null); // Exit any active mode
+            setSamPoints([]);
+            setSamMask(null);
         }
     };
 
@@ -205,21 +220,60 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
     // --- Annotate Logic ---
     // Initialize canvas for annotation when mode starts
     useEffect(() => {
-        if ((mode === 'ANNOTATE' || (mode === 'BACKGROUND' && bgTool === 'magic')) && canvasRef.current && imgRef.current) {
+        if ((mode === 'ANNOTATE' || (mode === 'BACKGROUND' && bgTool === 'magic') || mode === 'SEGMENT') && canvasRef.current && imgRef.current) {
             const canvas = canvasRef.current;
             canvas.width = imgRef.current.width;
             canvas.height = imgRef.current.height;
             const ctx = canvas.getContext('2d');
             if (ctx) {
-                ctx.lineCap = 'round';
-                ctx.lineJoin = 'round';
-                ctx.strokeStyle = color;
-                ctx.lineWidth = lineWidth;
-                // Draw the current image onto the canvas so we can draw over it
-                ctx.drawImage(imgRef.current, 0, 0, canvas.width, canvas.height);
+                // Clear canvas
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                if (mode === 'ANNOTATE') {
+                    ctx.lineCap = 'round';
+                    ctx.lineJoin = 'round';
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = lineWidth;
+                    ctx.drawImage(imgRef.current, 0, 0, canvas.width, canvas.height);
+                } else if (mode === 'BACKGROUND' && bgTool === 'magic') {
+                    ctx.drawImage(imgRef.current, 0, 0, canvas.width, canvas.height);
+                } else if (mode === 'SEGMENT') {
+                    // For segment, we draw the image, then points, then mask
+                    ctx.drawImage(imgRef.current, 0, 0, canvas.width, canvas.height);
+
+                    // Draw Mask if exists
+                    if (samMask) {
+                        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                        const data = imageData.data;
+                        const maskData = samMask.data;
+
+                        for (let i = 0; i < maskData.length; i++) {
+                            if (maskData[i] > 0) { // Threshold
+                                const idx = i * 4;
+                                // Add blue tint to masked area
+                                data[idx] = data[idx] * 0.5;     // R
+                                data[idx + 1] = data[idx + 1] * 0.5 + 100; // G (Greenish)
+                                data[idx + 2] = data[idx + 2] * 0.5 + 200; // B (Blueish)
+                                // Alpha remains same
+                            }
+                        }
+                        ctx.putImageData(imageData, 0, 0);
+                    }
+
+                    // Draw Points
+                    samPoints.forEach(p => {
+                        ctx.fillStyle = p.label === 1 ? '#00ff00' : '#ff0000';
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
+                        ctx.fill();
+                        ctx.strokeStyle = 'white';
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+                    });
+                }
             }
         }
-    }, [mode, currentSrc, bgTool]); // Re-run if mode or src changes
+    }, [mode, currentSrc, bgTool, samPoints, samMask]);
 
     // Update context style when color/width changes
     useEffect(() => {
@@ -237,6 +291,10 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
             handleMagicWand(e);
             return;
         }
+        if (mode === 'SEGMENT') {
+            handleSamClick(e);
+            return;
+        }
 
         setIsDrawing(true);
         const canvas = canvasRef.current;
@@ -250,7 +308,7 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
     };
 
     const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
-        if (mode === 'BACKGROUND') return;
+        if (mode === 'BACKGROUND' || mode === 'SEGMENT') return;
         if (!isDrawing) return;
         const canvas = canvasRef.current;
         if (!canvas) return;
@@ -277,6 +335,7 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
     const handleAutoRemoveBg = async () => {
         if (!currentSrc) return;
         setIsLoading(true);
+        setLoadingText("Removing background...");
         try {
             const newSrc = await removeBackgroundAuto(currentSrc);
             pushToHistory(newSrc);
@@ -286,6 +345,7 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
             alert("Failed to remove background automatically.");
         } finally {
             setIsLoading(false);
+            setLoadingText(null);
         }
     };
 
@@ -300,11 +360,6 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
         const y = Math.floor(e.clientY - rect.top);
 
         floodFill(ctx, x, y, tolerance);
-
-        // We don't push to history immediately on every click to allow multiple clicks?
-        // Or maybe we do? Let's do it for simplicity for now, or maybe just update the canvas and have an "Apply" button?
-        // The current structure for Annotate uses an "Apply" button. Let's stick to that pattern.
-        // Actually, floodFill modifies the canvas in place.
     };
 
     const applyBackgroundChanges = () => {
@@ -314,6 +369,131 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
             setBgTool(null);
         }
     };
+
+    // --- Segment Anything Logic ---
+    const initSam = async () => {
+        if (isSamReady) return;
+        setIsLoading(true);
+        setLoadingText("Loading AI Model (this may take a while)...");
+        try {
+            await loadSAMModel((progress) => {
+                setLoadingText(`Loading Model: ${Math.round(progress)}%`);
+            });
+
+            setLoadingText("Computing Image Embeddings...");
+            await computeEmbeddings(currentSrc);
+
+            setIsSamReady(true);
+        } catch (error) {
+            console.error("SAM Init failed", error);
+            alert("Failed to initialize Segment Anything.");
+            setMode(null);
+        } finally {
+            setIsLoading(false);
+            setLoadingText(null);
+        }
+    };
+
+    const samTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+    const handleSamClick = async (e: React.MouseEvent<HTMLCanvasElement>) => {
+        if (!isSamReady) return;
+
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+
+        // Calculate scale factors (CSS size vs Actual size)
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+
+        const x = (e.clientX - rect.left) * scaleX;
+        const y = (e.clientY - rect.top) * scaleY;
+
+        // Add point (Left click = positive, Shift+Click = negative)
+        const label = e.shiftKey ? 0 : 1;
+        const newPoints = [...samPoints, { x, y, label }];
+        setSamPoints(newPoints);
+
+        // Debounce mask generation - REMOVED for manual trigger
+        // if (samTimeoutRef.current) {
+        //     clearTimeout(samTimeoutRef.current);
+        // }
+        // samTimeoutRef.current = setTimeout(async () => { ... }, 50);
+    };
+
+    const handleGenerateMask = async () => {
+        if (samPoints.length === 0) return;
+        setIsLoading(true);
+        setLoadingText("Generating Mask...");
+        try {
+            const mask = await generateMask(samPoints);
+            setSamMask(mask);
+        } catch (error) {
+            console.error("Mask generation failed", error);
+            alert("Failed to generate mask. See console for details.");
+        } finally {
+            setIsLoading(false);
+            setLoadingText(null);
+        }
+    };
+
+    const applySamMask = () => {
+        if (!samMask || !imgRef.current) return;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = imgRef.current.width;
+        canvas.height = imgRef.current.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        // Draw original image
+        ctx.drawImage(imgRef.current, 0, 0);
+
+        // Apply mask to alpha channel
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        const maskData = samMask.data;
+
+        console.log("Applying Mask:", {
+            maskLength: maskData.length,
+            imagePixels: data.length / 4,
+            width: canvas.width,
+            height: canvas.height,
+            maskWidth: samMask.width,
+            maskHeight: samMask.height,
+            sampleValue: maskData[Math.floor(maskData.length / 2)]
+        });
+
+        if (maskData.length !== data.length / 4) {
+            console.error("Mask dimensions mismatch!");
+            return;
+        }
+
+        let transparentCount = 0;
+        for (let i = 0; i < maskData.length; i++) {
+            // If mask value <= 0.0 (logit threshold), make transparent
+            // SAM logits: > 0 is foreground, < 0 is background
+            if (maskData[i] <= 0.0) {
+                data[i * 4 + 3] = 0;
+                transparentCount++;
+            }
+        }
+        console.log(`Made ${transparentCount} pixels transparent.`);
+
+        ctx.putImageData(imageData, 0, 0);
+        pushToHistory(canvas.toDataURL('image/png'));
+        setMode(null);
+        setSamPoints([]);
+        setSamMask(null);
+    };
+
+    // Trigger SAM init when entering mode
+    useEffect(() => {
+        if (mode === 'SEGMENT') {
+            initSam();
+        }
+    }, [mode]);
 
 
     return (
@@ -352,6 +532,13 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
                             title="Background Removal"
                         >
                             <Eraser className="w-5 h-5" />
+                        </button>
+                        <button
+                            onClick={() => setMode(mode === 'SEGMENT' ? null : 'SEGMENT')}
+                            className={`p-2 rounded-lg transition-colors ${mode === 'SEGMENT' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                            title="Segment Anything"
+                        >
+                            <Scan className="w-5 h-5" />
                         </button>
 
                         <div className="h-6 w-px bg-slate-700 mx-2"></div>
@@ -410,7 +597,7 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
             </div>
 
             {/* Main Area */}
-            <div className="flex-1 overflow-auto p-8 flex items-center justify-center relative bg-[url('https://media.istockphoto.com/id/1133442802/vector/checkered-geometric-vector-background-with-black-and-gray-tile-transparent-grid-empty.jpg?s=612x612&w=0&k=20&c=6s3f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7')] bg-repeat">
+            <div className="flex-1 overflow-auto p-8 flex items-center justify-center relative bg-slate-900">
                 {/* Checkered background for transparency visibility */}
                 <div className="absolute inset-0 bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAMUlEQVQ4T2NkYGAQYcAP3uCTZhw1gGGYhAGBZIA/nYDCgBDAm9BGDWAAJyRCgLaBCAAgXwixzAS0pgAAAABJRU5ErkJggg==')] opacity-20 pointer-events-none"></div>
 
@@ -418,7 +605,7 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
                     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
                         <div className="flex flex-col items-center gap-4">
                             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500"></div>
-                            <p className="text-cyan-400 font-medium animate-pulse">Removing Background...</p>
+                            <p className="text-cyan-400 font-medium animate-pulse">{loadingText || "Processing..."}</p>
                         </div>
                     </div>
                 )}
@@ -540,6 +727,33 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
                     </div>
                 )}
 
+                {mode === 'SEGMENT' && (
+                    <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900 border border-slate-700 p-2 rounded-xl shadow-xl flex items-center gap-3">
+                        <span className="text-sm text-slate-300 px-2">Click object (Shift+Click to exclude)</span>
+
+                        <div className="h-6 w-px bg-slate-700"></div>
+
+                        <button
+                            onClick={handleGenerateMask}
+                            disabled={samPoints.length === 0}
+                            className="flex items-center gap-2 px-3 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <Sparkles className="w-4 h-4" />
+                            Generate Mask
+                        </button>
+
+                        <div className="h-6 w-px bg-slate-700"></div>
+
+                        <button
+                            onClick={applySamMask}
+                            disabled={!samMask}
+                            className="p-2 bg-cyan-600 rounded-lg text-white hover:bg-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <Check className="w-4 h-4" />
+                        </button>
+                    </div>
+                )}
+
                 {mode === 'CROP' && (
                     <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900 border border-slate-700 p-2 rounded-xl shadow-xl flex flex-col gap-2">
                         <div className="flex items-center gap-2">
@@ -564,7 +778,7 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
                         <ReactCrop crop={crop} onChange={c => setCrop(c)} onComplete={c => setCompletedCrop(c)}>
                             <img ref={imgRef} src={currentSrc} onLoad={onImageLoad} alt="Edit" className="max-h-[70vh] max-w-full object-contain" />
                         </ReactCrop>
-                    ) : (mode === 'ANNOTATE' || (mode === 'BACKGROUND' && bgTool === 'magic')) ? (
+                    ) : (mode === 'ANNOTATE' || (mode === 'BACKGROUND' && bgTool === 'magic') || mode === 'SEGMENT') ? (
                         <>
                             {/* Hidden img to maintain size reference if needed, but we draw on canvas */}
                             <img ref={imgRef} src={currentSrc} className="hidden" onLoad={onImageLoad} alt="Ref" />
@@ -574,7 +788,7 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
                                 onMouseMove={draw}
                                 onMouseUp={stopDrawing}
                                 onMouseLeave={stopDrawing}
-                                className={`max-h-[70vh] max-w-full object-contain ${bgTool === 'magic' ? 'cursor-crosshair' : 'cursor-crosshair'}`}
+                                className={`max-h-[70vh] max-w-full object-contain ${mode === 'SEGMENT' ? 'cursor-crosshair' : 'cursor-crosshair'}`}
                             />
                         </>
                     ) : (
