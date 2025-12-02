@@ -17,8 +17,8 @@ import {
     Sparkles,
     Scan
 } from 'lucide-react';
-import { floodFill, removeBackgroundAuto } from '../services/imageProcessing';
-import { loadSAMModel, computeEmbeddings, generateMask } from '../services/samService';
+import { floodFill, removeBackgroundAuto, filterLargestComponent } from '../services/imageProcessing';
+import { loadSAMModel, computeEmbeddings, generateMask, SAM_MODELS } from '../services/samService';
 
 interface ImageEditorProps {
     imageSrc: string;
@@ -62,6 +62,7 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
     const [samPoints, setSamPoints] = useState<{ x: number, y: number, label: number }[]>([]);
     const [samMask, setSamMask] = useState<{ data: Float32Array | any, width: number, height: number } | null>(null);
     const [isSamReady, setIsSamReady] = useState(false);
+    const [samModel, setSamModel] = useState<'FAST' | 'HIGH_QUALITY'>('FAST');
 
     // Initialize resize dims when image loads
     const onImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
@@ -376,7 +377,11 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
         setIsLoading(true);
         setLoadingText("Loading AI Model (this may take a while)...");
         try {
-            await loadSAMModel((progress) => {
+            const modelId = samModel === 'FAST'
+                ? SAM_MODELS.FAST
+                : SAM_MODELS.HIGH_QUALITY;
+
+            await loadSAMModel(modelId, (progress) => {
                 setLoadingText(`Loading Model: ${Math.round(progress)}%`);
             });
 
@@ -455,26 +460,30 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
         const data = imageData.data;
         const maskData = samMask.data;
 
+        // Filter mask to keep only the largest connected component
+        // This removes small noise artifacts
+        const filteredMaskData = filterLargestComponent(maskData, samMask.width, samMask.height);
+
         console.log("Applying Mask:", {
-            maskLength: maskData.length,
+            maskLength: filteredMaskData.length,
             imagePixels: data.length / 4,
             width: canvas.width,
             height: canvas.height,
             maskWidth: samMask.width,
             maskHeight: samMask.height,
-            sampleValue: maskData[Math.floor(maskData.length / 2)]
+            sampleValue: filteredMaskData[Math.floor(filteredMaskData.length / 2)]
         });
 
-        if (maskData.length !== data.length / 4) {
+        if (filteredMaskData.length !== data.length / 4) {
             console.error("Mask dimensions mismatch!");
             return;
         }
 
         let transparentCount = 0;
-        for (let i = 0; i < maskData.length; i++) {
+        for (let i = 0; i < filteredMaskData.length; i++) {
             // If mask value <= 0.0 (logit threshold), make transparent
             // SAM logits: > 0 is foreground, < 0 is background
-            if (maskData[i] <= 0.0) {
+            if (filteredMaskData[i] <= 0.0) {
                 data[i * 4 + 3] = 0;
                 transparentCount++;
             }
@@ -729,6 +738,18 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onCa
 
                 {mode === 'SEGMENT' && (
                     <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900 border border-slate-700 p-2 rounded-xl shadow-xl flex items-center gap-3">
+                        <select
+                            value={samModel}
+                            onChange={(e) => setSamModel(e.target.value as 'FAST' | 'HIGH_QUALITY')}
+                            className="bg-slate-800 text-white text-xs rounded px-2 py-1 border border-slate-600 outline-none"
+                            disabled={isLoading}
+                        >
+                            <option value="FAST">Fast (SlimSAM)</option>
+                            <option value="HIGH_QUALITY">High Quality (ViT-B)</option>
+                        </select>
+
+                        <div className="h-6 w-px bg-slate-700"></div>
+
                         <span className="text-sm text-slate-300 px-2">Click object (Shift+Click to exclude)</span>
 
                         <div className="h-6 w-px bg-slate-700"></div>

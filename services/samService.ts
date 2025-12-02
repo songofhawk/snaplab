@@ -3,7 +3,10 @@ import { env, SamModel, AutoProcessor, RawImage, Tensor } from '@xenova/transfor
 // Skip local model check
 env.allowLocalModels = false;
 
-const MODEL_ID = 'Xenova/slimsam-77-uniform';
+export const SAM_MODELS = {
+    FAST: 'Xenova/slimsam-77-uniform',
+    HIGH_QUALITY: 'Xenova/sam-vit-b'
+};
 
 interface SAMState {
     model: any;
@@ -11,6 +14,7 @@ interface SAMState {
     imageEmbeddings: any;
     imageInputs: any;
     rawImage: any;
+    currentModelId: string | null;
 }
 
 let samState: SAMState = {
@@ -19,15 +23,26 @@ let samState: SAMState = {
     imageEmbeddings: null,
     imageInputs: null,
     rawImage: null,
+    currentModelId: null
 };
 
-export const loadSAMModel = async (onProgress?: (progress: number) => void) => {
-    if (samState.model && samState.processor) {
+export const loadSAMModel = async (modelId: string, onProgress?: (progress: number) => void) => {
+    // If same model is already loaded, do nothing
+    if (samState.model && samState.processor && samState.currentModelId === modelId) {
         return;
     }
 
+    // Reset state if switching models
+    samState.model = null;
+    samState.processor = null;
+    samState.imageEmbeddings = null;
+    samState.imageInputs = null;
+    samState.currentModelId = null;
+
+    console.log(`Loading SAM Model: ${modelId}`, env);
+
     try {
-        samState.model = await SamModel.from_pretrained(MODEL_ID, {
+        samState.model = await SamModel.from_pretrained(modelId, {
             quantized: true,
             progress_callback: (data: any) => {
                 if (data.status === 'progress' && onProgress) {
@@ -36,7 +51,8 @@ export const loadSAMModel = async (onProgress?: (progress: number) => void) => {
             }
         });
 
-        samState.processor = await AutoProcessor.from_pretrained(MODEL_ID);
+        samState.processor = await AutoProcessor.from_pretrained(modelId);
+        samState.currentModelId = modelId;
     } catch (err) {
         console.error("Failed to load SAM model", err);
         throw err;

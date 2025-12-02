@@ -89,3 +89,96 @@ export const removeBackgroundAuto = async (imageSrc: string): Promise<string> =>
         throw error;
     }
 };
+
+/**
+ * Filters the mask to keep only the largest connected component of foreground pixels.
+ * This helps remove small noise artifacts.
+ * 
+ * @param maskData The raw mask data (Float32Array)
+ * @param width Width of the mask
+ * @param height Height of the mask
+ * @returns A new Float32Array with only the largest component kept
+ */
+export const filterLargestComponent = (
+    maskData: Float32Array,
+    width: number,
+    height: number
+): Float32Array => {
+    const size = width * height;
+    const visited = new Uint8Array(size); // 0: unvisited, 1: visited
+    const labels = new Int32Array(size).fill(0); // 0: background, >0: component ID
+    let currentLabel = 1;
+    const componentSizes: Map<number, number> = new Map();
+
+    // Helper to get index
+    const getIdx = (x: number, y: number) => y * width + x;
+
+    // Iterate over all pixels
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const idx = getIdx(x, y);
+
+            // If pixel is foreground (> 0) and not visited
+            if (maskData[idx] > 0 && visited[idx] === 0) {
+                // Start BFS
+                const queue = [idx];
+                visited[idx] = 1;
+                labels[idx] = currentLabel;
+                let count = 0;
+
+                let head = 0;
+                while (head < queue.length) {
+                    const currIdx = queue[head++];
+                    count++;
+
+                    const cx = currIdx % width;
+                    const cy = Math.floor(currIdx / width);
+
+                    // Check 4 neighbors
+                    const neighbors = [
+                        { nx: cx - 1, ny: cy },
+                        { nx: cx + 1, ny: cy },
+                        { nx: cx, ny: cy - 1 },
+                        { nx: cx, ny: cy + 1 }
+                    ];
+
+                    for (const { nx, ny } of neighbors) {
+                        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                            const nIdx = getIdx(nx, ny);
+                            if (maskData[nIdx] > 0 && visited[nIdx] === 0) {
+                                visited[nIdx] = 1;
+                                labels[nIdx] = currentLabel;
+                                queue.push(nIdx);
+                            }
+                        }
+                    }
+                }
+
+                componentSizes.set(currentLabel, count);
+                currentLabel++;
+            }
+        }
+    }
+
+    // Find largest component
+    let maxLabel = -1;
+    let maxSize = -1;
+    componentSizes.forEach((size, label) => {
+        if (size > maxSize) {
+            maxSize = size;
+            maxLabel = label;
+        }
+    });
+
+    // Create new mask
+    const newMask = new Float32Array(size);
+    for (let i = 0; i < size; i++) {
+        if (labels[i] === maxLabel) {
+            newMask[i] = maskData[i]; // Keep original value
+        } else {
+            newMask[i] = -10.0; // Set to background (negative value)
+        }
+    }
+
+    return newMask;
+};
