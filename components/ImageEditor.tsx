@@ -605,34 +605,59 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
     }, [mode, isSamReady, isSamInitializing]);
 
     // --- Zoom / Pan Logic ---
-    const handleWheel = (e: React.WheelEvent) => {
-        if (e.ctrlKey || e.metaKey) {
-            // Zoom to mouse
-            const rect = e.currentTarget.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left - rect.width / 2; // Relative to center
-            const mouseY = e.clientY - rect.top - rect.height / 2;
 
-            const delta = -e.deltaY;
-            const scaleAmount = 0.1;
-            const newZoom = Math.max(0.1, Math.min(10, zoom + (delta > 0 ? scaleAmount : -scaleAmount)));
+    // Ref for the container to attach non-passive event listener
+    const containerRef = useRef<HTMLDivElement>(null);
 
-            // Adjust pan to keep mouse point stationary relative to image
-            // P_new = P_old + (Mouse - P_old) * (1 - Z_new/Z_old) ? 
-            // Simpler: The shift in world space is (ZoomDiff * MouseOffset).
-            // Since we scale from center, the mouse position moves away from center by factor.
-            // We need to move it back.
+    // Use useEffect to attach the wheel listener with passive: false
+    useEffect(() => {
+        const container = containerRef.current;
+        if (!container) return;
 
-            const scaleFactor = newZoom / zoom;
-            const newPanX = pan.x + (mouseX - pan.x) * (1 - scaleFactor);
-            const newPanY = pan.y + (mouseY - pan.y) * (1 - scaleFactor);
+        const onWheel = (e: WheelEvent) => {
+            e.preventDefault();
 
-            setZoom(newZoom);
-            setPan({ x: newPanX, y: newPanY });
-        } else {
-            // Pan
-            setPan(p => ({ x: p.x - e.deltaX, y: p.y - e.deltaY }));
-        }
-    };
+            if (e.ctrlKey || e.metaKey) {
+                // Zoom to mouse
+                const rect = container.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left - rect.width / 2; // Relative to center
+                const mouseY = e.clientY - rect.top - rect.height / 2;
+
+                const delta = -e.deltaY;
+                const scaleAmount = 0.1;
+
+                // We need to use the functional update form of setZoom/setPan or refs to get current values
+                // inside the event listener if we don't want to re-bind the listener on every state change.
+                // However, re-binding is safer for closure freshness. 
+                // Given the frequency of wheel events, let's try to use refs for state or just accept re-binding.
+                // To avoid stale closures without re-binding, we can use the state setters' functional form 
+                // BUT we need the *current* zoom to calculate the new pan.
+
+                // So we will rely on the dependency array of this useEffect to update the listener when zoom/pan changes.
+
+                // NOTE: We are using the values from the closure (zoom, pan). 
+                // This effect will re-run whenever zoom or pan changes.
+
+                const newZoom = Math.max(0.1, Math.min(10, zoom + (delta > 0 ? scaleAmount : -scaleAmount)));
+
+                const scaleFactor = newZoom / zoom;
+                const newPanX = pan.x + (mouseX - pan.x) * (1 - scaleFactor);
+                const newPanY = pan.y + (mouseY - pan.y) * (1 - scaleFactor);
+
+                setZoom(newZoom);
+                setPan({ x: newPanX, y: newPanY });
+            } else {
+                // Pan
+                setPan(p => ({ x: p.x - e.deltaX, y: p.y - e.deltaY }));
+            }
+        };
+
+        container.addEventListener('wheel', onWheel, { passive: false });
+
+        return () => {
+            container.removeEventListener('wheel', onWheel);
+        };
+    }, [zoom, pan]); // Re-bind when state changes
 
     const handleMouseDownPan = (e: React.MouseEvent) => {
         if (e.button === 1 || (e.button === 0 && e.altKey)) { // Middle click or Alt+Click
@@ -1018,8 +1043,8 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
 
             {/* Main Area */}
             <div
+                ref={containerRef}
                 className="flex-1 overflow-hidden p-8 relative bg-slate-900 cursor-move flex items-center justify-center"
-                onWheel={handleWheel}
                 onMouseDown={handleMouseDownPan}
                 onMouseMove={handleMouseMovePan}
                 onMouseUp={handleMouseUpPan}
