@@ -980,8 +980,6 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
                     </button>
                 </div>
 
-                {/* Checkered background for transparency visibility - Fixed to viewport */}
-                <div className="absolute inset-0 bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAMUlEQVQ4T2NkYGAQYcAP3uCTZhw1gGGYhAGBZIA/nYDCgBDAm9BGDWAAJyRCgLaBCAAgXwixzAS0pgAAAABJRU5ErkJggg==')] opacity-20 pointer-events-none"></div>
 
                 {isLoading && (
                     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
@@ -994,51 +992,68 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
 
                 {/* REMOVED FLOATING TOOLBARS - Moved to Options Bar */}
 
-                {/* Image / Canvas Display */}
+                {/* Transform Wrapper - 外层应用缩放和平移，不影响内部坐标系 */}
                 <div
-                    className="relative shadow-2xl transition-transform duration-75 ease-out origin-center"
+                    className="transition-transform duration-75 ease-out"
                     style={{
                         transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-                        cursor: isPanning ? 'grabbing' : (mode === 'PIXEL_EDIT' ? 'crosshair' : 'default')
+                        transformOrigin: 'center'
                     }}
                 >
-                    {mode === 'CROP' ? (
-                        <ReactCrop crop={crop} onChange={c => setCrop(c)} onComplete={c => setCompletedCrop(c)}>
-                            <img ref={imgRef} src={currentSrc} onLoad={onImageLoad} alt="Edit" className="max-h-none max-w-none" />
-                        </ReactCrop>
-                    ) : (
-                        <>
-                            {/* Show Image if NOT in a drawing mode */}
-                            <img
-                                ref={imgRef}
-                                src={currentSrc}
-                                onLoad={onImageLoad}
-                                alt="Edit"
-                                className={`max-h-none max-w-none ${mode === 'ANNOTATE' ||
+                    {/* Image / Canvas Container - 保持原始坐标系 */}
+                    <div
+                        className="relative shadow-2xl"
+                        style={{
+                            cursor: isPanning ? 'grabbing' : (mode === 'PIXEL_EDIT' ? 'crosshair' : 'default'),
+                            backgroundImage: `
+                                linear-gradient(45deg, #808080 25%, transparent 25%),
+                                linear-gradient(-45deg, #808080 25%, transparent 25%),
+                                linear-gradient(45deg, transparent 75%, #808080 75%),
+                                linear-gradient(-45deg, transparent 75%, #808080 75%)
+                            `,
+                            backgroundSize: '20px 20px',
+                            backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
+                            backgroundColor: '#a0a0a0'
+                        }}
+                    >
+                        {mode === 'CROP' ? (
+                            <ReactCrop crop={crop} onChange={c => setCrop(c)} onComplete={c => setCompletedCrop(c)}>
+                                <img ref={imgRef} src={currentSrc} onLoad={onImageLoad} alt="Edit" className="max-h-none max-w-none" />
+                            </ReactCrop>
+                        ) : (
+                            <>
+                                {/* Show Image if NOT in a drawing mode */}
+                                <img
+                                    ref={imgRef}
+                                    src={currentSrc}
+                                    onLoad={onImageLoad}
+                                    alt="Edit"
+                                    className={`max-h-none max-w-none ${mode === 'ANNOTATE' ||
                                         mode === 'PIXEL_EDIT' ||
                                         mode === 'SEGMENT' ||
                                         (mode === 'BACKGROUND' && bgTool !== null)
                                         ? 'pointer-events-none opacity-0 absolute'
                                         : ''
-                                    }`}
-                            />
-                            {/* Show Canvas if IN a drawing mode */}
-                            <canvas
-                                ref={canvasRef}
-                                onMouseDown={startDrawing}
-                                onMouseMove={draw}
-                                onMouseUp={stopDrawing}
-                                onMouseLeave={stopDrawing}
-                                className={`max-h-none max-w-none ${mode === 'ANNOTATE' ||
+                                        }`}
+                                />
+                                {/* Show Canvas if IN a drawing mode */}
+                                <canvas
+                                    ref={canvasRef}
+                                    onMouseDown={startDrawing}
+                                    onMouseMove={draw}
+                                    onMouseUp={stopDrawing}
+                                    onMouseLeave={stopDrawing}
+                                    className={`max-h-none max-w-none ${mode === 'ANNOTATE' ||
                                         mode === 'PIXEL_EDIT' ||
                                         mode === 'SEGMENT' ||
                                         (mode === 'BACKGROUND' && bgTool !== null)
                                         ? ''
                                         : 'hidden'
-                                    }`}
-                            />
-                        </>
-                    )}
+                                        }`}
+                                />
+                            </>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>
