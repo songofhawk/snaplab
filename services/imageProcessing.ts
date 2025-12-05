@@ -75,14 +75,60 @@ export const floodFill = (
 };
 
 /**
+ * Cleans transparent pixels by setting their RGB values to 0.
+ * This prevents background removal libraries from misinterpreting transparent pixels.
+ * 
+ * @param imageSrc The source image URL
+ * @returns A promise that resolves to a cleaned image data URL
+ */
+const cleanTransparentPixels = async (imageSrc: string): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                reject(new Error('Failed to get canvas context'));
+                return;
+            }
+
+            ctx.drawImage(img, 0, 0);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+
+            // For transparent pixels (alpha = 0), set RGB to 0
+            for (let i = 0; i < data.length; i += 4) {
+                if (data[i + 3] === 0) {
+                    data[i] = 0;     // R
+                    data[i + 1] = 0; // G
+                    data[i + 2] = 0; // B
+                }
+            }
+
+            ctx.putImageData(imageData, 0, 0);
+            resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = () => reject(new Error('Failed to load image'));
+        img.src = imageSrc;
+    });
+};
+
+/**
  * Removes the background from an image URL using @imgly/background-removal.
+ * Before processing, transparent pixels are cleaned to prevent them from being
+ * misinterpreted as background (which would turn them black).
  * 
  * @param imageSrc The source image URL
  * @returns A promise that resolves to the new image URL (blob URL)
  */
 export const removeBackgroundAuto = async (imageSrc: string): Promise<string> => {
     try {
-        const blob = await removeBackground(imageSrc);
+        // Clean transparent pixels first to prevent them from being turned black
+        const cleanedImageSrc = await cleanTransparentPixels(imageSrc);
+        const blob = await removeBackground(cleanedImageSrc);
         return URL.createObjectURL(blob);
     } catch (error) {
         console.error("Background removal failed:", error);

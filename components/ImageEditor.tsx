@@ -410,14 +410,34 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
     const stopDrawing = () => {
         setIsDrawing(false);
         setIsErasingPixel(false);
-        if (mode === 'PIXEL_EDIT') {
-            applyAnnotation(); // Save state on mouse up for pixel edit
-        }
+        // 不再自动应用更改，让用户可以持续使用 eraser，直到点击 Apply 按钮
     };
 
     const applyAnnotation = () => {
         if (canvasRef.current) {
-            pushToHistory(canvasRef.current.toDataURL('image/png'));
+            const canvas = canvasRef.current;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+
+            // For PIXEL_EDIT mode, clean transparent pixels' RGB values
+            // to prevent them from being misinterpreted by background removal
+            if (mode === 'PIXEL_EDIT') {
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const data = imageData.data;
+
+                // For transparent pixels (alpha = 0), set RGB to 0
+                for (let i = 0; i < data.length; i += 4) {
+                    if (data[i + 3] === 0) {
+                        data[i] = 0;     // R
+                        data[i + 1] = 0; // G
+                        data[i + 2] = 0; // B
+                    }
+                }
+
+                ctx.putImageData(imageData, 0, 0);
+            }
+
+            pushToHistory(canvas.toDataURL('image/png'));
             setMode(null);
         }
     };
