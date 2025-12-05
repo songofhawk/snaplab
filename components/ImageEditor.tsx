@@ -12,13 +12,13 @@ import {
     FlipHorizontal,
     FlipVertical,
     Undo2,
-    Eraser,
     Wand2,
     Sparkles,
     Scan,
     ZoomIn,
     ZoomOut,
-    MousePointer2,
+    Brush,
+    ImageOff,
     Scissors,
     Hand
 } from 'lucide-react';
@@ -758,14 +758,14 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
                             className={`p-2 rounded-lg transition-colors ${mode === 'PIXEL_EDIT' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
                             title="Pixel Eraser"
                         >
-                            <MousePointer2 className="w-5 h-5" />
+                            <Brush className="w-5 h-5" />
                         </button>
                         <button
                             onClick={() => setMode(mode === 'BACKGROUND' ? null : 'BACKGROUND')}
                             className={`p-2 rounded-lg transition-colors ${mode === 'BACKGROUND' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
                             title="Background Removal"
                         >
-                            <Eraser className="w-5 h-5" />
+                            <ImageOff className="w-5 h-5" />
                         </button>
 
                         <div className="h-6 w-px bg-slate-700 mx-2 self-center"></div>
@@ -796,6 +796,25 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
                         >
                             <FlipHorizontal className="w-5 h-5" />
                         </button>
+
+                        <div className="h-6 w-px bg-slate-700 mx-2 self-center"></div>
+
+                        {/* Actions */}
+                        <button
+                            onClick={() => onSplit(currentSrc)}
+                            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                            title="Split"
+                        >
+                            <Scissors className="w-5 h-5" />
+                        </button>
+                        <button
+                            onClick={() => onSave(currentSrc)}
+                            disabled={isLoading}
+                            className={`p-2 rounded-lg transition-colors ${isLoading ? 'text-slate-600 cursor-not-allowed' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                            title="Save"
+                        >
+                            <Save className="w-5 h-5" />
+                        </button>
                     </div>
                 </div>
 
@@ -807,25 +826,6 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
                         title="Undo"
                     >
                         <Undo2 className="w-5 h-5" />
-                    </button>
-
-                    <div className="h-6 w-px bg-slate-700 mx-2"></div>
-
-                    <button
-                        onClick={() => onSplit(currentSrc)}
-                        className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-lg font-medium transition-colors shadow-lg shadow-cyan-900/20"
-                    >
-                        <Scissors className="w-4 h-4" />
-                        Split
-                    </button>
-
-                    <button
-                        onClick={() => onSave(currentSrc)}
-                        disabled={isLoading}
-                        className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-medium transition-colors"
-                    >
-                        <Save className="w-4 h-4" />
-                        Save
                     </button>
                 </div>
             </div>
