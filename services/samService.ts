@@ -3,8 +3,8 @@ import { env, SamModel, AutoProcessor, RawImage, Tensor } from '@xenova/transfor
 // Skip local model check
 env.allowLocalModels = false;
 
-// Use HuggingFace mirror for better accessibility
-env.remoteHost = 'https://hf-mirror.com';
+// Use default HuggingFace CDN (cdn-lfs.hf.co / huggingface.co)
+// Note: hf-mirror.com no longer supports CORS
 
 export const SAM_MODELS = {
     FAST: 'Xenova/slimsam-77-uniform',
