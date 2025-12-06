@@ -382,12 +382,39 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
                     const data = imageData.data;
                     const maskData = samMask.data;
 
-                    for (let i = 0; i < maskData.length; i++) {
-                        if (maskData[i] > 0) {
-                            const idx = i * 4;
-                            data[idx] = data[idx] * 0.5;
-                            data[idx + 1] = data[idx + 1] * 0.5 + 100;
-                            data[idx + 2] = data[idx + 2] * 0.5 + 200;
+                    if (samMask.isLowRes && samMask.originalWidth && samMask.originalHeight) {
+                        // Low-res mask: scale up using nearest neighbor interpolation
+                        const maskW = samMask.width;
+                        const maskH = samMask.height;
+                        const targetW = canvas.width;
+                        const targetH = canvas.height;
+
+                        for (let y = 0; y < targetH; y++) {
+                            for (let x = 0; x < targetW; x++) {
+                                // Map canvas coords to mask coords (nearest neighbor)
+                                const mx = Math.floor((x / targetW) * maskW);
+                                const my = Math.floor((y / targetH) * maskH);
+                                const maskIdx = my * maskW + mx;
+
+                                // mask > 0 = foreground (selected object)
+                                if (maskData[maskIdx] > 0) {
+                                    const idx = (y * targetW + x) * 4;
+                                    data[idx] = data[idx] * 0.5;
+                                    data[idx + 1] = data[idx + 1] * 0.5 + 100;
+                                    data[idx + 2] = data[idx + 2] * 0.5 + 200;
+                                }
+                            }
+                        }
+                    } else {
+                        // Full-res mask: direct mapping
+                        // mask > 0 = foreground (selected object)
+                        for (let i = 0; i < maskData.length; i++) {
+                            if (maskData[i] > 0) {
+                                const idx = i * 4;
+                                data[idx] = data[idx] * 0.5;
+                                data[idx + 1] = data[idx + 1] * 0.5 + 100;
+                                data[idx + 2] = data[idx + 2] * 0.5 + 200;
+                            }
                         }
                     }
                     ctx.putImageData(imageData, 0, 0);
@@ -540,16 +567,43 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
 
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imageData.data;
+        
+        // Filter the largest connected component
         const filteredMaskData = filterLargestComponent(samMask.data, samMask.width, samMask.height);
 
-        if (filteredMaskData.length !== data.length / 4) {
-            console.error("Mask dimensions mismatch!");
-            return;
-        }
+        if (samMask.isLowRes) {
+            // Low-res mask: scale up and apply
+            const maskW = samMask.width;
+            const maskH = samMask.height;
+            const targetW = canvas.width;
+            const targetH = canvas.height;
 
-        for (let i = 0; i < filteredMaskData.length; i++) {
-            if (filteredMaskData[i] <= 0.0) {
-                data[i * 4 + 3] = 0;
+            for (let y = 0; y < targetH; y++) {
+                for (let x = 0; x < targetW; x++) {
+                    // Map canvas coords to mask coords (nearest neighbor)
+                    const mx = Math.floor((x / targetW) * maskW);
+                    const my = Math.floor((y / targetH) * maskH);
+                    const maskIdx = my * maskW + mx;
+
+                    // mask > 0 = foreground (keep), mask <= 0 = background (remove)
+                    if (filteredMaskData[maskIdx] <= 0) {
+                        const idx = (y * targetW + x) * 4 + 3;
+                        data[idx] = 0;  // Set alpha to 0
+                    }
+                }
+            }
+        } else {
+            // Full-res mask: direct mapping
+            if (filteredMaskData.length !== data.length / 4) {
+                console.error("Mask dimensions mismatch!");
+                return;
+            }
+
+            for (let i = 0; i < filteredMaskData.length; i++) {
+                // mask > 0 = foreground (keep), mask <= 0 = background (remove)
+                if (filteredMaskData[i] <= 0) {
+                    data[i * 4 + 3] = 0;
+                }
             }
         }
 

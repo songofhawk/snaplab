@@ -1,9 +1,9 @@
-import { env, SamModel, AutoProcessor, RawImage, Tensor } from '@xenova/transformers';
+import { env, SamModel, AutoProcessor, RawImage, Tensor } from '@huggingface/transformers';
 
 // Skip local model check
 env.allowLocalModels = false;
 
-// Use default HuggingFace CDN (cdn-lfs.hf.co / huggingface.co)
+// Use default HuggingFace CDN
 // Note: hf-mirror.com no longer supports CORS
 
 export const SAM_MODELS = {
@@ -53,8 +53,14 @@ export const loadSAMModel = async (modelId: string, onProgress?: (progress: numb
     console.log(`Loading SAM Model: ${modelId}`, env);
 
     try {
+        // Check WebGPU availability
+        const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
+        console.log(`WebGPU available: ${hasWebGPU}`);
+
         samState.model = await SamModel.from_pretrained(modelId, {
-            quantized: true,
+            // dtype must be specified for WebGPU to work properly
+            dtype: 'fp32',
+            device: hasWebGPU ? 'webgpu' : 'wasm',
             progress_callback: (data: any) => {
                 if (data.status === 'progress' && onProgress) {
                     onProgress(data.progress);
@@ -78,14 +84,20 @@ export const computeEmbeddings = async (imageUrl: string) => {
         throw new Error("Model not loaded");
     }
 
+    console.log("computeEmbeddings: Loading image...");
     const image = await RawImage.fromURL(imageUrl);
     samState.rawImage = image;
+    console.log(`computeEmbeddings: Image loaded (${image.width}x${image.height})`);
 
+    console.log("computeEmbeddings: Processing image with processor...");
     const inputs = await samState.processor(image);
     samState.imageInputs = inputs;
+    console.log("computeEmbeddings: Image processed, keys:", Object.keys(inputs));
 
     // Compute embeddings
+    console.log("computeEmbeddings: Computing embeddings (this may take a while on first run)...");
     samState.imageEmbeddings = await samState.model.get_image_embeddings(inputs);
+    console.log("computeEmbeddings: Embeddings computed!");
 
     return {
         width: image.width,
@@ -93,101 +105,95 @@ export const computeEmbeddings = async (imageUrl: string) => {
     };
 };
 
-export const generateMask = async (points: { x: number, y: number, label: number }[]) => {
+export const generateMask = async (points: { x: number, y: number, label: number }[], skipPostProcess = false) => {
     if (!samState.model || !samState.processor || !samState.imageEmbeddings || !samState.rawImage || !samState.imageInputs) {
         throw new Error("Model or embeddings not ready");
     }
 
-    // Get dimensions from imageInputs (computed during computeEmbeddings)
     const originalHeight = samState.rawImage.height;
     const originalWidth = samState.rawImage.width;
 
-    // Calculate scale factor (SAM resizes longest side to 1024)
-    const targetSize = 1024;
-    const scale = targetSize / Math.max(originalHeight, originalWidth);
+    console.log(`Original image size: ${originalWidth}x${originalHeight}`);
+    console.log(`Input points:`, points);
 
-    // Resize points
-    const resizedPoints = points.map(p => [p.x * scale, p.y * scale]);
+    // v3 API: Use processor to prepare point inputs
+    const input_points = [points.map(p => [p.x, p.y])];
+    const input_labels = [points.map(p => p.label)];
+    
+    console.log("Formatted input_points:", input_points);
+    console.log("Formatted input_labels:", input_labels);
 
-    // Create Tensors
-    const n = points.length;
-    const pointsFlat = resizedPoints.flat();
-    const labelsFlat = points.map(p => p.label);
-
-    // Shape: [batch_size, point_batch_size, nb_points_per_image, 2] -> [1, 1, n, 2]
-    const inputPointsTensor = new Tensor(
-        'float32',
-        new Float32Array(pointsFlat),
-        [1, 1, n, 2]
+    // Process points with the image to get properly formatted tensors
+    const pointInputs = await samState.processor(
+        samState.rawImage,
+        { input_points, input_labels }
     );
 
-    // Shape: [batch_size, point_batch_size, nb_points_per_image] -> [1, 1, n]
-    const inputLabelsTensor = new Tensor(
-        'int64',
-        new BigInt64Array(labelsFlat.map(l => BigInt(l))),
-        [1, 1, n]
-    );
+    console.log("Point inputs keys:", Object.keys(pointInputs));
 
-    console.log("SAM Inputs:", {
-        image_embeddings: samState.imageEmbeddings,
-        input_points: inputPointsTensor,
-        input_labels: inputLabelsTensor,
-        pixel_values: samState.imageInputs.pixel_values
-    });
-
-    // Run model with precomputed embeddings
-    // Note: pixel_values are required by the model signature even if we provide embeddings
+    // Run model with PRECOMPUTED embeddings + new point inputs
+    // This is the key: use cached image_embeddings for speed, but new points
     const outputs = await samState.model({
-        pixel_values: samState.imageInputs.pixel_values,
-        image_embeddings: samState.imageEmbeddings,
-        input_points: inputPointsTensor,
-        input_labels: inputLabelsTensor,
+        ...pointInputs,
+        image_embeddings: samState.imageEmbeddings,  // Use precomputed embeddings!
     });
 
-    // Post-process masks
-    // The output masks are low-res (256x256). We need to resize them to original image size.
-    // We can use the processor's post_process_masks if available, or just return the mask and let the UI scale it?
-    // UI scaling is faster (canvas drawImage).
-    // But `post_process_masks` also handles thresholding and selecting the best mask.
+    // Analyze all 3 masks to find the smallest one with good score
+    const scores = outputs.iou_scores.data;
+    const numMasks = 3;
+    const scoreOffset = scores.length - numMasks;
+    
+    const predMasks = outputs.pred_masks;
+    const maskDims = predMasks.dims;
+    const maskH = maskDims[maskDims.length - 2];
+    const maskW = maskDims[maskDims.length - 1];
+    const singleMaskSize = maskH * maskW;
+    
+    console.log("Mask analysis:");
+    const maskInfos: { index: number; score: number; coverage: number }[] = [];
+    for (let m = 0; m < numMasks; m++) {
+        const start = m * singleMaskSize;
+        let positiveCount = 0;
+        for (let i = 0; i < singleMaskSize; i++) {
+            if (predMasks.data[start + i] > 0) positiveCount++;
+        }
+        const coverage = positiveCount / singleMaskSize;
+        const score = scores[scoreOffset + m];
+        maskInfos.push({ index: m, score, coverage });
+        console.log(`  Mask ${m}: score=${score.toFixed(3)}, coverage=${(coverage * 100).toFixed(1)}%`);
+    }
+    
+    // Select the mask with smallest coverage that has score > 0.8
+    // This gives us the most precise segmentation
+    const validMasks = maskInfos.filter(m => m.score > 0.8);
+    validMasks.sort((a, b) => a.coverage - b.coverage);
+    
+    const selected = validMasks.length > 0 ? validMasks[0] : maskInfos[0];
+    const bestIndex = selected.index;
+    const maxScore = selected.score;
+    
+    console.log(`Selected mask index: ${bestIndex} (smallest valid) with score: ${maxScore.toFixed(3)}, coverage: ${(selected.coverage * 100).toFixed(1)}%`);
 
-    // Let's try to use processor.post_process_masks. 
-    // It requires original_sizes and reshaped_input_sizes.
-    // We can construct them.
-
-    const originalSizes = [[originalHeight, originalWidth]];
-    const reshapedInputSizes = [[Math.round(originalHeight * scale), Math.round(originalWidth * scale)]];
-
+    // Post-process masks using the correct v3 API
     const masks = await samState.processor.post_process_masks(
         outputs.pred_masks,
-        originalSizes,
-        reshapedInputSizes
+        pointInputs.original_sizes,
+        pointInputs.reshaped_input_sizes
     );
 
     // masks is a list of Tensors. We take the first one (batch index 0).
-    const maskTensor = masks[0]; // Batch 0
+    const maskTensor = masks[0];
 
-    // maskTensor shape: [3, height, width] (3 candidate masks)
-    // Select best mask based on iou_scores
-    const scores = outputs.iou_scores.data; // Float32Array
-    let bestIndex = 0;
-    let maxScore = -1;
-    for (let i = 0; i < scores.length; i++) {
-        if (scores[i] > maxScore) {
-            maxScore = scores[i];
-            bestIndex = i;
-        }
-    }
+    console.log("Mask tensor dims:", maskTensor.dims);
+    console.log("Mask tensor type:", maskTensor.type);
 
-    // Extract the best mask
+    // maskTensor shape: [1, 3, height, width] or [3, height, width]
     const dims = maskTensor.dims;
     let h, w;
-    // Check if dims is 4D [batch, num_masks, height, width] or 3D [num_masks, height, width]
     if (dims.length === 4) {
-        // [1, 3, H, W]
         h = dims[2];
         w = dims[3];
     } else {
-        // [3, H, W]
         h = dims[1];
         w = dims[2];
     }
@@ -195,7 +201,20 @@ export const generateMask = async (points: { x: number, y: number, label: number
     const stride = h * w;
     const start = bestIndex * stride;
     const end = start + stride;
-    const maskData = maskTensor.data.slice(start, end);
+    const rawMaskData = maskTensor.data.slice(start, end);
+
+    // In v3, post_process_masks returns bool type (true/false)
+    // true = foreground (object), false = background
+    // Convert to Float32Array: true -> 1, false -> 0
+    const maskData = new Float32Array(rawMaskData.length);
+    let foregroundCount = 0;
+    for (let i = 0; i < rawMaskData.length; i++) {
+        // Handle boolean values correctly
+        maskData[i] = rawMaskData[i] ? 1 : 0;
+        if (maskData[i] > 0) foregroundCount++;
+    }
+    
+    console.log(`Foreground pixels: ${foregroundCount}/${maskData.length} (${(foregroundCount/maskData.length*100).toFixed(1)}%)`);
 
     return {
         data: maskData,

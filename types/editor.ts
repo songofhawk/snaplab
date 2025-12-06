@@ -22,6 +22,9 @@ export interface SamMaskData {
     data: Float32Array | any;
     width: number;
     height: number;
+    isLowRes?: boolean;  // 是否是低分辨率 mask (用于快速预览)
+    originalWidth?: number;  // 原图宽度
+    originalHeight?: number; // 原图高度
 }
 
 // 缩放尺寸
