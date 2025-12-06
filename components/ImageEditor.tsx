@@ -627,10 +627,45 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
                 setMode={handleModeChange}
                 currentStep={currentStep}
                 isLoading={isLoading}
+                canvasModified={canvasModified}
                 onUndo={handleUndoWithReset}
                 onRotate={rotateImage}
                 onFlipHorizontal={flipHorizontal}
-                onSave={() => onSave(currentSrc)}
+                onCopy={async () => {
+                    try {
+                        let srcToUse = currentSrc;
+                        if ((mode === 'ANNOTATE' || mode === 'PIXEL_EDIT') && canvasRef.current) {
+                            srcToUse = canvasRef.current.toDataURL('image/png');
+                            if (canvasModified) {
+                                pushToHistory(srcToUse);
+                                setCanvasModified(false);
+                                setMode(null);
+                            }
+                        }
+                        const response = await fetch(srcToUse);
+                        const blob = await response.blob();
+                        await navigator.clipboard.write([
+                            new ClipboardItem({ [blob.type]: blob })
+                        ]);
+                    } catch (err) {
+                        console.error('Failed to copy image:', err);
+                    }
+                }}
+                onDownload={() => {
+                    let srcToUse = currentSrc;
+                    if ((mode === 'ANNOTATE' || mode === 'PIXEL_EDIT') && canvasRef.current) {
+                        srcToUse = canvasRef.current.toDataURL('image/png');
+                        if (canvasModified) {
+                            pushToHistory(srcToUse);
+                            setCanvasModified(false);
+                            setMode(null);
+                        }
+                    }
+                    const link = document.createElement('a');
+                    link.download = `edited-image-${Date.now()}.png`;
+                    link.href = srcToUse;
+                    link.click();
+                }}
                 onSplit={() => onSplit(currentSrc)}
             />
 

@@ -3,7 +3,8 @@ import {
     Crop as CropIcon,
     Scan,
     Pen,
-    Save,
+    Download,
+    Copy,
     RotateCw,
     FlipHorizontal,
     Undo2,
@@ -19,10 +20,12 @@ interface EditorToolbarProps {
     setMode: (mode: EditMode) => void;
     currentStep: number;
     isLoading: boolean;
+    canvasModified: boolean;
     onUndo: () => void;
     onRotate: () => void;
     onFlipHorizontal: () => void;
-    onSave: () => void;
+    onCopy: () => void;
+    onDownload: () => void;
     onSplit: () => void;
 }
 
@@ -31,10 +34,12 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
     setMode,
     currentStep,
     isLoading,
+    canvasModified,
     onUndo,
     onRotate,
     onFlipHorizontal,
-    onSave,
+    onCopy,
+    onDownload,
     onSplit
 }) => {
     const toggleMode = (newMode: EditMode) => {
@@ -135,15 +140,26 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                         <Grid className="w-5 h-5" />
                     </button>
                     <button
-                        onClick={onSave}
+                        onClick={onCopy}
                         disabled={isLoading}
                         className={`p-2 rounded-lg transition-colors ${isLoading
                             ? 'text-slate-600 cursor-not-allowed'
                             : 'text-slate-400 hover:text-white hover:bg-slate-800'
                         }`}
-                        title="Save"
+                        title="Copy to Clipboard"
                     >
-                        <Save className="w-5 h-5" />
+                        <Copy className="w-5 h-5" />
+                    </button>
+                    <button
+                        onClick={onDownload}
+                        disabled={isLoading}
+                        className={`p-2 rounded-lg transition-colors ${isLoading
+                            ? 'text-slate-600 cursor-not-allowed'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                        }`}
+                        title="Download"
+                    >
+                        <Download className="w-5 h-5" />
                     </button>
                 </div>
             </div>
@@ -151,8 +167,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             <div className="flex items-center gap-3">
                 <button
                     onClick={onUndo}
-                    disabled={currentStep === 0 || isLoading}
-                    className={`p-2 rounded-lg transition-colors flex items-center gap-2 ${currentStep === 0
+                    disabled={(currentStep === 0 && !canvasModified) || isLoading}
+                    className={`p-2 rounded-lg transition-colors flex items-center gap-2 ${(currentStep === 0 && !canvasModified)
                         ? 'text-slate-600 cursor-not-allowed'
                         : 'text-slate-300 hover:text-white hover:bg-slate-800'
                     }`}
