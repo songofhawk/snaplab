@@ -787,6 +787,16 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
                     </div>
                 )}
 
+                {/* Generate Mask Overlay */}
+                {isGeneratingMask && (
+                    <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/50 backdrop-blur-[2px]">
+                        <div className="flex flex-col items-center gap-3 bg-slate-900/80 px-6 py-4 rounded-lg border border-purple-500/30">
+                            <div className="animate-spin rounded-full h-8 w-8 border-2 border-purple-500 border-t-transparent"></div>
+                            <p className="text-purple-300 text-sm font-medium">Generating Mask...</p>
+                        </div>
+                    </div>
+                )}
+
                 {/* Canvas */}
                 <EditorCanvas
                     mode={mode}
