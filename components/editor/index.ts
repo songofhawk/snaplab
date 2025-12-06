@@ -11,3 +11,4 @@ export { PixelEditOptions } from './tools/PixelEditOptions';
 export { BackgroundOptions } from './tools/BackgroundOptions';
 export { SegmentOptions } from './tools/SegmentOptions';
 
+

@@ -11,7 +11,8 @@ import {
     Target,
     Eraser,
     ImageOff,
-    Grid
+    Grid,
+    ImagePlus
 } from 'lucide-react';
 import { EditMode } from '../../types/editor';
 
@@ -24,6 +25,7 @@ interface EditorToolbarProps {
     onUndo: () => void;
     onRotate: () => void;
     onFlipHorizontal: () => void;
+    onChangeImage?: () => void;
     onCopy: () => void;
     onDownload: () => void;
     onSplit: () => void;
@@ -38,6 +40,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
     onUndo,
     onRotate,
     onFlipHorizontal,
+    onChangeImage,
     onCopy,
     onDownload,
     onSplit
@@ -55,6 +58,15 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
     return (
         <div className="h-16 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between px-4">
             <div className="flex items-center gap-4">
+                {onChangeImage && (
+                    <button
+                        onClick={onChangeImage}
+                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                        title="Change Image"
+                    >
+                        <ImagePlus className="w-5 h-5" />
+                    </button>
+                )}
                 <h2 className="text-xl font-bold text-white">Edit</h2>
                 <div className="h-6 w-px bg-slate-700"></div>
 

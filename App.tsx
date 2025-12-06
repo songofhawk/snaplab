@@ -148,6 +148,25 @@ const App: React.FC = () => {
     setState(AppState.IMAGE_EDIT);
   };
 
+  // Return to Image Editor from Split Editor
+  const handleBackToEditor = () => {
+    setState(AppState.IMAGE_EDIT);
+  };
+
+  // Change image (open file picker)
+  const handleChangeImage = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file && file.type.startsWith('image/')) {
+        loadImage(file);
+      }
+    };
+    input.click();
+  };
+
   // Called when user clicks "Done" or "Split" in ImageEditor
   const handleImageEditorSave = (newSrc: string, action: 'save' | 'split') => {
     // Update the source with the edited version
@@ -226,7 +245,7 @@ const App: React.FC = () => {
                 rowSplits={rowSplits}
                 colSplits={colSplits}
                 onConfirm={executeSplits}
-                onCancel={handleReset}
+                onCancel={handleBackToEditor}
                 onReRunDetection={handleReRunDetection}
                 onSplitsChange={(rows, cols) => {
                   setRowSplits(rows);
@@ -244,6 +263,7 @@ const App: React.FC = () => {
                 onSave={(src) => handleImageEditorSave(src, 'save')}
                 onSplit={(src) => handleImageEditorSave(src, 'split')}
                 onCancel={handleReset}
+                onChangeImage={handleChangeImage}
               />
             </div>
           )}

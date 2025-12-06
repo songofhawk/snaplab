@@ -5,3 +5,4 @@ export { PixelEditOptions } from './PixelEditOptions';
 export { BackgroundOptions } from './BackgroundOptions';
 export { SegmentOptions } from './SegmentOptions';
 
+

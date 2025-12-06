@@ -44,3 +44,4 @@ export const ZoomControls: React.FC<ZoomControlsProps> = ({
     );
 };
 
+

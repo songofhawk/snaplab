@@ -1,4 +1,5 @@
 import React from 'react';
+import { X } from 'lucide-react';
 import { EditMode, BgToolType, PixelEditMode, SamModelType, ResizeDimensions } from '../../types/editor';
 import { CropOptions } from './tools/CropOptions';
 import { ResizeOptions } from './tools/ResizeOptions';
@@ -9,6 +10,7 @@ import { SegmentOptions } from './tools/SegmentOptions';
 
 interface EditorOptionsBarProps {
     mode: EditMode;
+    onCancel: () => void;
 
     // Crop
     onSetCropAspect: (aspect: number | undefined) => void;
@@ -55,6 +57,7 @@ interface EditorOptionsBarProps {
 
 export const EditorOptionsBar: React.FC<EditorOptionsBarProps> = ({
     mode,
+    onCancel,
     // Crop
     onSetCropAspect,
     onApplyCrop,
@@ -93,72 +96,91 @@ export const EditorOptionsBar: React.FC<EditorOptionsBarProps> = ({
     onApplySamMask
 }) => {
     return (
-        <div className="h-12 bg-slate-900 border-b border-slate-800 flex items-center justify-center px-4 relative z-40">
-            {mode === 'CROP' && (
-                <CropOptions
-                    onSetAspect={onSetCropAspect}
-                    onApply={onApplyCrop}
-                />
+        <div className="h-12 bg-slate-900 border-b border-slate-800 flex items-center px-4 relative z-40">
+            {/* Cancel button on the left when mode is active */}
+            {mode && (
+                <button
+                    onClick={onCancel}
+                    className="flex items-center gap-1 px-2 py-1 text-sm text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors mr-4"
+                    title="Cancel (Esc)"
+                >
+                    <X className="w-4 h-4" />
+                    <span>Cancel</span>
+                </button>
             )}
 
-            {mode === 'RESIZE' && (
-                <ResizeOptions
-                    dimensions={resizeDims}
-                    maintainAspect={maintainAspect}
-                    onDimensionChange={onResizeDimensionChange}
-                    onMaintainAspectChange={onMaintainAspectChange}
-                    onSetPercent={onSetResizePercent}
-                    onApply={onApplyResize}
-                />
-            )}
+            {/* Options content centered */}
+            <div className="flex-1 flex items-center justify-center">
+                {mode === 'CROP' && (
+                    <CropOptions
+                        onSetAspect={onSetCropAspect}
+                        onApply={onApplyCrop}
+                    />
+                )}
 
-            {mode === 'ANNOTATE' && (
-                <AnnotateOptions
-                    color={annotateColor}
-                    lineWidth={annotateLineWidth}
-                    onColorChange={onAnnotateColorChange}
-                    onLineWidthChange={onAnnotateLineWidthChange}
-                    onApply={onApplyAnnotation}
-                />
-            )}
+                {mode === 'RESIZE' && (
+                    <ResizeOptions
+                        dimensions={resizeDims}
+                        maintainAspect={maintainAspect}
+                        onDimensionChange={onResizeDimensionChange}
+                        onMaintainAspectChange={onMaintainAspectChange}
+                        onSetPercent={onSetResizePercent}
+                        onApply={onApplyResize}
+                    />
+                )}
 
-            {mode === 'PIXEL_EDIT' && (
-                <PixelEditOptions
-                    pixelMode={pixelMode}
-                    brushSize={pixelBrushSize}
-                    onModeChange={onPixelModeChange}
-                    onBrushSizeChange={onPixelBrushSizeChange}
-                    onApply={onApplyAnnotation}
-                />
-            )}
+                {mode === 'ANNOTATE' && (
+                    <AnnotateOptions
+                        color={annotateColor}
+                        lineWidth={annotateLineWidth}
+                        onColorChange={onAnnotateColorChange}
+                        onLineWidthChange={onAnnotateLineWidthChange}
+                        onApply={onApplyAnnotation}
+                    />
+                )}
 
-            {mode === 'BACKGROUND' && (
-                <BackgroundOptions
-                    bgTool={bgTool}
-                    tolerance={tolerance}
-                    onBgToolChange={onBgToolChange}
-                    onToleranceChange={onToleranceChange}
-                    onAutoRemove={onAutoRemoveBg}
-                    onApply={onApplyBackground}
-                />
-            )}
+                {mode === 'PIXEL_EDIT' && (
+                    <PixelEditOptions
+                        pixelMode={pixelMode}
+                        brushSize={pixelBrushSize}
+                        onModeChange={onPixelModeChange}
+                        onBrushSizeChange={onPixelBrushSizeChange}
+                        onApply={onApplyAnnotation}
+                    />
+                )}
 
-            {mode === 'SEGMENT' && (
-                <SegmentOptions
-                    samModel={samModel}
-                    pointsCount={samPointsCount}
-                    hasMask={hasSamMask}
-                    isLoading={isLoading}
-                    onModelChange={onSamModelChange}
-                    onGenerateMask={onGenerateMask}
-                    onApply={onApplySamMask}
-                />
-            )}
+                {mode === 'BACKGROUND' && (
+                    <BackgroundOptions
+                        bgTool={bgTool}
+                        tolerance={tolerance}
+                        onBgToolChange={onBgToolChange}
+                        onToleranceChange={onToleranceChange}
+                        onAutoRemove={onAutoRemoveBg}
+                        onApply={onApplyBackground}
+                    />
+                )}
 
-            {!mode && (
-                <span className="text-xs text-slate-500">Select a tool to start editing</span>
-            )}
+                {mode === 'SEGMENT' && (
+                    <SegmentOptions
+                        samModel={samModel}
+                        pointsCount={samPointsCount}
+                        hasMask={hasSamMask}
+                        isLoading={isLoading}
+                        onModelChange={onSamModelChange}
+                        onGenerateMask={onGenerateMask}
+                        onApply={onApplySamMask}
+                    />
+                )}
+
+                {!mode && (
+                    <span className="text-xs text-slate-500">Select a tool to start editing</span>
+                )}
+            </div>
+
+            {/* Spacer for symmetry when mode is active */}
+            {mode && <div className="w-20"></div>}
         </div>
     );
 };
+
 

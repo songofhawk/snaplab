@@ -276,7 +276,7 @@ export const SplitEditor: React.FC<SplitEditorProps> = ({
           onClick={onCancel}
           className="px-6 py-3 rounded-xl font-semibold text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
         >
-          Cancel
+          Back
         </button>
         <button
           onClick={() => onConfirm(rowSplits, colSplits)}

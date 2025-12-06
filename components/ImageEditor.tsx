@@ -33,9 +33,10 @@ interface ImageEditorProps {
     onSave: (newSrc: string) => void;
     onSplit: (newSrc: string) => void;
     onCancel: () => void;
+    onChangeImage?: () => void;
 }
 
-export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSplit, onCancel }) => {
+export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSplit, onCancel, onChangeImage }) => {
     // --- Refs ---
     const imgRef = useRef<HTMLImageElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -205,6 +206,26 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
             setBgTool(null);
         }
     }, [mode, bgTool, canvasModified, isCanvasEditMode, saveCanvasToHistory]);
+
+    // --- Cancel Mode Handler ---
+    const handleCancelMode = useCallback(() => {
+        setMode(null);
+        setSamPoints([]);
+        setSamMask(null);
+        setBgTool(null);
+        setCanvasModified(false);
+    }, []);
+
+    // --- Esc Key Handler ---
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape' && mode) {
+                handleCancelMode();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [mode, handleCancelMode]);
 
     // --- Undo with Mode Reset ---
     const handleUndoWithReset = useCallback(() => {
@@ -657,6 +678,7 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
                 onUndo={handleUndoWithReset}
                 onRotate={rotateImage}
                 onFlipHorizontal={flipHorizontal}
+                onChangeImage={onChangeImage}
                 onCopy={async () => {
                     try {
                         let srcToUse = currentSrc;
@@ -698,6 +720,7 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
             {/* Options Bar */}
             <EditorOptionsBar
                 mode={mode}
+                onCancel={handleCancelMode}
                 // Crop
                 onSetCropAspect={setAspectCrop}
                 onApplyCrop={applyCrop}
