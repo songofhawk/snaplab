@@ -110,6 +110,9 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
     const [isErasingPixel, setIsErasingPixel] = useState(false);
     const [pixelMode, setPixelMode] = useState<PixelEditMode>('ERASE');
 
+    // --- Canvas Modified State (track unsaved changes) ---
+    const [canvasModified, setCanvasModified] = useState(false);
+
     // --- Image Load Handler ---
     const onImageLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
         const { width, height } = e.currentTarget;
@@ -129,6 +132,29 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
 
     // --- Mode Change Handler ---
     const handleModeChange = useCallback((newMode: EditMode) => {
+        // 如果从 ANNOTATE 或 PIXEL_EDIT 切换出去，且有未保存的修改，自动保存
+        if ((mode === 'ANNOTATE' || mode === 'PIXEL_EDIT') && canvasModified && canvasRef.current) {
+            const canvas = canvasRef.current;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+                // 对于 PIXEL_EDIT，清理透明像素的 RGB 值
+                if (mode === 'PIXEL_EDIT') {
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    const data = imageData.data;
+                    for (let i = 0; i < data.length; i += 4) {
+                        if (data[i + 3] === 0) {
+                            data[i] = 0;
+                            data[i + 1] = 0;
+                            data[i + 2] = 0;
+                        }
+                    }
+                    ctx.putImageData(imageData, 0, 0);
+                }
+                pushToHistory(canvas.toDataURL('image/png'));
+            }
+            setCanvasModified(false);
+        }
+
         setMode(newMode);
         if (newMode !== 'SEGMENT') {
             setSamPoints([]);
@@ -137,7 +163,7 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
         if (newMode !== 'BACKGROUND') {
             setBgTool(null);
         }
-    }, []);
+    }, [mode, canvasModified, pushToHistory]);
 
     // --- Undo with Mode Reset ---
     const handleUndoWithReset = useCallback(() => {
@@ -145,6 +171,7 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
         setMode(null);
         setSamPoints([]);
         setSamMask(null);
+        setCanvasModified(false);
     }, [handleUndo]);
 
     // ========================
@@ -330,81 +357,6 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
     }, [color, lineWidth, mode]);
 
     // ========================
-    // Drawing Logic
-    // ========================
-    const startDrawing = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-        if (mode === 'BACKGROUND' && bgTool === 'magic') {
-            handleMagicWand(e);
-            return;
-        }
-        if (mode === 'SEGMENT') {
-            handleSamClick(e);
-            return;
-        }
-        if (mode === 'PIXEL_EDIT') {
-            setIsErasingPixel(true);
-            handlePixelEraser(e);
-            return;
-        }
-
-        setIsDrawing(true);
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-
-        const coords = getCanvasCoordinates(e.clientX, e.clientY, canvas);
-        ctx.beginPath();
-        ctx.moveTo(coords.x, coords.y);
-    }, [mode, bgTool, getCanvasCoordinates]);
-
-    const draw = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-        if (mode === 'BACKGROUND' || mode === 'SEGMENT') return;
-        if (mode === 'PIXEL_EDIT') {
-            if (isErasingPixel) handlePixelEraser(e);
-            return;
-        }
-        if (!isDrawing) return;
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-
-        const coords = getCanvasCoordinates(e.clientX, e.clientY, canvas);
-        ctx.lineTo(coords.x, coords.y);
-        ctx.stroke();
-    }, [mode, isDrawing, isErasingPixel, getCanvasCoordinates]);
-
-    const stopDrawing = useCallback(() => {
-        setIsDrawing(false);
-        setIsErasingPixel(false);
-    }, []);
-
-    const applyAnnotation = useCallback(() => {
-        if (canvasRef.current) {
-            const canvas = canvasRef.current;
-            const ctx = canvas.getContext('2d');
-            if (!ctx) return;
-
-            if (mode === 'PIXEL_EDIT') {
-                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                const data = imageData.data;
-                for (let i = 0; i < data.length; i += 4) {
-                    if (data[i + 3] === 0) {
-                        data[i] = 0;
-                        data[i + 1] = 0;
-                        data[i + 2] = 0;
-                    }
-                }
-                ctx.putImageData(imageData, 0, 0);
-            }
-
-            pushToHistory(canvas.toDataURL('image/png'));
-            setMode(null);
-        }
-    }, [mode, pushToHistory]);
-
-    // ========================
     // Background Removal Logic
     // ========================
     const handleAutoRemoveBg = useCallback(async () => {
@@ -584,7 +536,85 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
             ctx.drawImage(imgRef.current, 0, 0, canvas.width, canvas.height);
         }
         ctx.restore();
+        setCanvasModified(true);
     }, [getCanvasCoordinates, pixelMode, pixelBrushSize]);
+
+    // ========================
+    // Drawing Logic
+    // ========================
+    const startDrawing = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+        if (mode === 'BACKGROUND' && bgTool === 'magic') {
+            handleMagicWand(e);
+            return;
+        }
+        if (mode === 'SEGMENT') {
+            handleSamClick(e);
+            return;
+        }
+        if (mode === 'PIXEL_EDIT') {
+            setIsErasingPixel(true);
+            handlePixelEraser(e);
+            return;
+        }
+
+        setIsDrawing(true);
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const coords = getCanvasCoordinates(e.clientX, e.clientY, canvas);
+        ctx.beginPath();
+        ctx.moveTo(coords.x, coords.y);
+    }, [mode, bgTool, getCanvasCoordinates, handleMagicWand, handleSamClick, handlePixelEraser]);
+
+    const draw = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+        if (mode === 'BACKGROUND' || mode === 'SEGMENT') return;
+        if (mode === 'PIXEL_EDIT') {
+            if (isErasingPixel) handlePixelEraser(e);
+            return;
+        }
+        if (!isDrawing) return;
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const coords = getCanvasCoordinates(e.clientX, e.clientY, canvas);
+        ctx.lineTo(coords.x, coords.y);
+        ctx.stroke();
+        setCanvasModified(true);
+    }, [mode, isDrawing, isErasingPixel, getCanvasCoordinates, handlePixelEraser]);
+
+    const stopDrawing = useCallback(() => {
+        setIsDrawing(false);
+        setIsErasingPixel(false);
+    }, []);
+
+    const applyAnnotation = useCallback(() => {
+        if (canvasRef.current) {
+            const canvas = canvasRef.current;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+
+            if (mode === 'PIXEL_EDIT') {
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const data = imageData.data;
+                for (let i = 0; i < data.length; i += 4) {
+                    if (data[i + 3] === 0) {
+                        data[i] = 0;
+                        data[i + 1] = 0;
+                        data[i + 2] = 0;
+                    }
+                }
+                ctx.putImageData(imageData, 0, 0);
+            }
+
+            pushToHistory(canvas.toDataURL('image/png'));
+            setMode(null);
+            setCanvasModified(false);
+        }
+    }, [mode, pushToHistory]);
 
     // ========================
     // Render
