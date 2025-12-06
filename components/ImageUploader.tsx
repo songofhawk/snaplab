@@ -84,7 +84,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected })
           </div>
           <div>
             <h3 className="text-xl font-semibold text-white mb-1">
-              Upload Stitched Image
+              Upload Image
             </h3>
             <p className="text-slate-400">
               Click to browse, drag & drop, or press <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-xs">Ctrl+V</kbd> to paste

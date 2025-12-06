@@ -6,7 +6,7 @@ import { ImageEditor } from './components/ImageEditor';
 import { ResultGallery } from './components/ResultGallery';
 import { LoadingOverlay } from './components/LoadingOverlay';
 import { detectSeamsLocal } from './services/localSplitService';
-import { Layers, Scissors } from 'lucide-react';
+import { Layers, Sparkles } from 'lucide-react';
 
 const App: React.FC = () => {
   const [state, setState] = useState<AppState>(AppState.UPLOAD);
@@ -200,10 +200,10 @@ const App: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="bg-gradient-to-br from-cyan-500 to-blue-600 p-2 rounded-lg">
-              <Scissors className="text-white w-5 h-5" />
+              <Sparkles className="text-white w-5 h-5" />
             </div>
             <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
-              SplitStitch
+              SnapLab
             </h1>
           </div>
           <div className="text-sm text-slate-500">
@@ -222,14 +222,14 @@ const App: React.FC = () => {
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 w-full flex flex-col items-center">
               <div className="text-center mb-12 max-w-2xl">
                 <h2 className="text-4xl md:text-5xl font-bold text-white mb-6 tracking-tight">
-                  Smartly split your <br />
+                  Browser-based <br />
                   <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500">
-                    stitched images
+                    image editor
                   </span>
                 </h2>
                 <p className="text-lg text-slate-400 leading-relaxed">
-                  Upload a long screenshot, collage, or sprite sheet.
-                  Local algorithm detects boundaries to split the image into a grid.
+                  AI segmentation, background removal, cropping, resizing, and smart splitting.
+                  Runs entirely in your browser — no uploads, no server costs.
                 </p>
               </div>
               <ImageUploader onImageSelected={loadImage} />

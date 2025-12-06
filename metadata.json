@@ -1,5 +1,5 @@
 {
-  "name": "SplitStitch AI",
-  "description": "Upload stitched images (long screenshots, collages). Gemini AI automatically detects the boundaries to split them back into individual images.",
+  "name": "SnapLab",
+  "description": "A powerful local image editor with AI-powered segmentation, background removal, cropping, resizing, and smart image splitting.",
   "requestFramePermissions": []
 }
