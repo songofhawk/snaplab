@@ -4,6 +4,7 @@ import { EditMode, BgToolType, PixelEditMode, SamModelType, ResizeDimensions } f
 import { CropOptions } from './tools/CropOptions';
 import { ResizeOptions } from './tools/ResizeOptions';
 import { AnnotateOptions } from './tools/AnnotateOptions';
+import { TextOptions } from './tools/TextOptions';
 import { PixelEditOptions } from './tools/PixelEditOptions';
 import { BackgroundOptions } from './tools/BackgroundOptions';
 import { SegmentOptions } from './tools/SegmentOptions';
@@ -30,6 +31,13 @@ interface EditorOptionsBarProps {
     onAnnotateColorChange: (color: string) => void;
     onAnnotateLineWidthChange: (width: number) => void;
     onApplyAnnotation: () => void;
+
+    // Text
+    textColor: string;
+    textFontSize: number;
+    onTextColorChange: (color: string) => void;
+    onTextFontSizeChange: (size: number) => void;
+    onApplyText: () => void;
 
     // Pixel Edit
     pixelMode: PixelEditMode;
@@ -75,6 +83,12 @@ export const EditorOptionsBar: React.FC<EditorOptionsBarProps> = ({
     onAnnotateColorChange,
     onAnnotateLineWidthChange,
     onApplyAnnotation,
+    // Text
+    textColor,
+    textFontSize,
+    onTextColorChange,
+    onTextFontSizeChange,
+    onApplyText,
     // Pixel Edit
     pixelMode,
     pixelBrushSize,
@@ -138,6 +152,16 @@ export const EditorOptionsBar: React.FC<EditorOptionsBarProps> = ({
                         onColorChange={onAnnotateColorChange}
                         onLineWidthChange={onAnnotateLineWidthChange}
                         onApply={onApplyAnnotation}
+                    />
+                )}
+
+                {mode === 'TEXT' && (
+                    <TextOptions
+                        color={textColor}
+                        fontSize={textFontSize}
+                        onColorChange={onTextColorChange}
+                        onFontSizeChange={onTextFontSizeChange}
+                        onApply={onApplyText}
                     />
                 )}
 

@@ -1,5 +1,5 @@
 // 编辑器模式
-export type EditMode = 'CROP' | 'RESIZE' | 'ANNOTATE' | 'BACKGROUND' | 'SEGMENT' | 'PIXEL_EDIT' | null;
+export type EditMode = 'CROP' | 'RESIZE' | 'ANNOTATE' | 'TEXT' | 'BACKGROUND' | 'SEGMENT' | 'PIXEL_EDIT' | null;
 
 // 背景工具类型
 export type BgToolType = 'magic' | null;

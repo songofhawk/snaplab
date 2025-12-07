@@ -49,6 +49,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
     onCanvasMouseLeave
 }) => {
     const isCanvasMode = mode === 'ANNOTATE' ||
+        mode === 'TEXT' ||
         mode === 'PIXEL_EDIT' ||
         mode === 'SEGMENT' ||
         (mode === 'BACKGROUND' && bgTool !== null);
@@ -68,7 +69,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
             <div
                 className="relative shadow-2xl"
                 style={{
-                    cursor: isPanning ? 'grabbing' : (mode === 'PIXEL_EDIT' ? 'crosshair' : 'default'),
+                    cursor: isPanning ? 'grabbing' : (mode === 'PIXEL_EDIT' ? 'crosshair' : (mode === 'TEXT' ? 'text' : 'default')),
                     backgroundImage: `
                         linear-gradient(45deg, #808080 25%, transparent 25%),
                         linear-gradient(-45deg, #808080 25%, transparent 25%),

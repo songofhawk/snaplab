@@ -28,6 +28,15 @@ import { ZoomControls } from './editor/ZoomControls';
 import { floodFill, removeBackgroundAuto, filterLargestComponent } from '../services/imageProcessing';
 import { loadSAMModel, computeEmbeddings, generateMask, SAM_MODELS } from '../services/samService';
 
+interface TextObject {
+    id: string;
+    text: string;
+    x: number;
+    y: number;
+    color: string;
+    fontSize: number;
+}
+
 interface ImageEditorProps {
     imageSrc: string;
     onSave: (newSrc: string) => void;
@@ -118,13 +127,20 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
     // --- Canvas Modified State (track unsaved changes) ---
     const [canvasModified, setCanvasModified] = useState(false);
 
+    // --- Text State ---
+    const [textObjects, setTextObjects] = useState<TextObject[]>([]);
+    const [textColor, setTextColor] = useState('#ffffff');
+    const [textFontSize, setTextFontSize] = useState(32);
+    const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
+    const [isEditingText, setIsEditingText] = useState(false);
+
     // ========================
     // 工具状态统一管理
     // ========================
     
     // 判断某个模式是否是 canvas 编辑模式（直接在 canvas 上操作）
     const isCanvasEditMode = useCallback((m: EditMode, bg: BgToolType = null): boolean => {
-        return m === 'ANNOTATE' || m === 'PIXEL_EDIT' || (m === 'BACKGROUND' && bg === 'magic');
+        return m === 'ANNOTATE' || m === 'TEXT' || m === 'PIXEL_EDIT' || (m === 'BACKGROUND' && bg === 'magic');
     }, []);
 
     // 判断某个模式是否需要清理透明像素的 RGB 值
@@ -206,6 +222,11 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
         if (newMode !== 'BACKGROUND') {
             setBgTool(null);
         }
+        if (newMode !== 'TEXT') {
+            setTextObjects([]);
+            setSelectedTextId(null);
+            setIsEditingText(false);
+        }
     }, [mode, bgTool, canvasModified, isCanvasEditMode, saveCanvasToHistory]);
 
     // --- Cancel Mode Handler ---
@@ -214,6 +235,9 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
         setSamPoints([]);
         setSamMask(null);
         setBgTool(null);
+        setTextObjects([]);
+        setSelectedTextId(null);
+        setIsEditingText(false);
         setCanvasModified(false);
     }, []);
 
@@ -355,7 +379,7 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
     // Canvas Initialization Effect
     // ========================
     useEffect(() => {
-        if ((mode === 'ANNOTATE' || (mode === 'BACKGROUND' && bgTool === 'magic') || mode === 'SEGMENT' || mode === 'PIXEL_EDIT') && canvasRef.current && imgRef.current) {
+        if ((mode === 'ANNOTATE' || mode === 'TEXT' || (mode === 'BACKGROUND' && bgTool === 'magic') || mode === 'SEGMENT' || mode === 'PIXEL_EDIT') && canvasRef.current && imgRef.current) {
             const canvas = canvasRef.current;
             canvas.width = imgRef.current.width;
             canvas.height = imgRef.current.height;
@@ -370,6 +394,29 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
                 ctx.strokeStyle = color;
                 ctx.lineWidth = lineWidth;
                 ctx.drawImage(imgRef.current, 0, 0, canvas.width, canvas.height);
+            } else if (mode === 'TEXT') {
+                ctx.drawImage(imgRef.current, 0, 0, canvas.width, canvas.height);
+                
+                // Draw all text objects
+                textObjects.forEach(textObj => {
+                    ctx.font = `${textObj.fontSize}px Arial`;
+                    ctx.fillStyle = textObj.color;
+                    ctx.fillText(textObj.text, textObj.x, textObj.y);
+
+                    // Draw selection box if selected
+                    if (textObj.id === selectedTextId) {
+                        const metrics = ctx.measureText(textObj.text);
+                        const padding = 4;
+                        ctx.strokeStyle = '#00ff00';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(
+                            textObj.x - padding,
+                            textObj.y - textObj.fontSize - padding,
+                            metrics.width + padding * 2,
+                            textObj.fontSize + padding * 2
+                        );
+                    }
+                });
             } else if (mode === 'BACKGROUND' && bgTool === 'magic') {
                 ctx.drawImage(imgRef.current, 0, 0, canvas.width, canvas.height);
             } else if (mode === 'PIXEL_EDIT') {
@@ -406,7 +453,7 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
                 });
             }
         }
-    }, [mode, currentSrc, bgTool, samPoints, samMask, color, lineWidth]);
+    }, [mode, currentSrc, bgTool, samPoints, samMask, color, lineWidth, textObjects, selectedTextId]);
 
     // Update context style when color/width changes
     useEffect(() => {
@@ -606,6 +653,120 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
     }, [getCanvasCoordinates, pixelMode, pixelBrushSize]);
 
     // ========================
+    // Text Editing Logic (must be before Drawing Logic)
+    // ========================
+    const findTextAtPosition = useCallback((x: number, y: number): TextObject | null => {
+        const canvas = canvasRef.current;
+        if (!canvas) return null;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return null;
+
+        // Check from top to bottom (reverse order, so top text is checked first)
+        for (let i = textObjects.length - 1; i >= 0; i--) {
+            const textObj = textObjects[i];
+            ctx.font = `${textObj.fontSize}px Arial`;
+            const metrics = ctx.measureText(textObj.text);
+            
+            if (
+                x >= textObj.x &&
+                x <= textObj.x + metrics.width &&
+                y >= textObj.y - textObj.fontSize &&
+                y <= textObj.y
+            ) {
+                return textObj;
+            }
+        }
+        return null;
+    }, [textObjects]);
+
+    const handleTextClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const coords = getCanvasCoordinates(e.clientX, e.clientY, canvas);
+        const scaleX = canvas.width / imgRef.current!.width;
+        const scaleY = canvas.height / imgRef.current!.height;
+
+        const x = coords.x * scaleX;
+        const y = coords.y * scaleY;
+
+        // Check if clicked on existing text
+        const clickedText = findTextAtPosition(x, y);
+        
+        if (clickedText) {
+            // Select existing text
+            setSelectedTextId(clickedText.id);
+            setIsEditingText(false);
+        } else {
+            // Add new text
+            const newText = prompt('Enter text:');
+            if (newText && newText.trim()) {
+                const newTextObj: TextObject = {
+                    id: `text-${Date.now()}`,
+                    text: newText,
+                    x,
+                    y,
+                    color: textColor,
+                    fontSize: textFontSize
+                };
+                setTextObjects(prev => [...prev, newTextObj]);
+                setSelectedTextId(newTextObj.id);
+                setCanvasModified(true);
+            }
+        }
+    }, [getCanvasCoordinates, findTextAtPosition, textColor, textFontSize]);
+
+    const handleEditSelectedText = useCallback(() => {
+        if (!selectedTextId) return;
+        
+        const textObj = textObjects.find(t => t.id === selectedTextId);
+        if (!textObj) return;
+
+        const newText = prompt('Edit text:', textObj.text);
+        if (newText !== null && newText.trim()) {
+            setTextObjects(prev => prev.map(t => 
+                t.id === selectedTextId ? { ...t, text: newText } : t
+            ));
+            setCanvasModified(true);
+        }
+    }, [selectedTextId, textObjects]);
+
+    const handleDeleteSelectedText = useCallback(() => {
+        if (!selectedTextId) return;
+        
+        setTextObjects(prev => prev.filter(t => t.id !== selectedTextId));
+        setSelectedTextId(null);
+        setCanvasModified(true);
+    }, [selectedTextId]);
+
+    const applyText = useCallback(() => {
+        if (saveCanvasToHistory()) {
+            setMode(null);
+            setTextObjects([]);
+            setSelectedTextId(null);
+            setIsEditingText(false);
+        }
+    }, [saveCanvasToHistory]);
+
+    // Handle keyboard shortcuts for text editing
+    useEffect(() => {
+        if (mode !== 'TEXT' || !selectedTextId) return;
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Delete' || e.key === 'Backspace') {
+                e.preventDefault();
+                handleDeleteSelectedText();
+            } else if (e.key === 'Enter' || e.key === 'e') {
+                e.preventDefault();
+                handleEditSelectedText();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [mode, selectedTextId, handleDeleteSelectedText, handleEditSelectedText]);
+
+    // ========================
     // Drawing Logic
     // ========================
     const startDrawing = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -622,6 +783,10 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
             handlePixelEraser(e);
             return;
         }
+        if (mode === 'TEXT') {
+            handleTextClick(e);
+            return;
+        }
 
         setIsDrawing(true);
         const canvas = canvasRef.current;
@@ -632,10 +797,10 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
         const coords = getCanvasCoordinates(e.clientX, e.clientY, canvas);
         ctx.beginPath();
         ctx.moveTo(coords.x, coords.y);
-    }, [mode, bgTool, getCanvasCoordinates, handleMagicWand, handleSamClick, handlePixelEraser]);
+    }, [mode, bgTool, getCanvasCoordinates, handleMagicWand, handleSamClick, handlePixelEraser, handleTextClick]);
 
     const draw = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-        if (mode === 'BACKGROUND' || mode === 'SEGMENT') return;
+        if (mode === 'BACKGROUND' || mode === 'SEGMENT' || mode === 'TEXT') return;
         if (mode === 'PIXEL_EDIT') {
             if (isErasingPixel) handlePixelEraser(e);
             return;
@@ -737,6 +902,12 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
                 onAnnotateColorChange={setColor}
                 onAnnotateLineWidthChange={setLineWidth}
                 onApplyAnnotation={applyAnnotation}
+                // Text
+                textColor={textColor}
+                textFontSize={textFontSize}
+                onTextColorChange={setTextColor}
+                onTextFontSizeChange={setTextFontSize}
+                onApplyText={applyText}
                 // Pixel Edit
                 pixelMode={pixelMode}
                 pixelBrushSize={pixelBrushSize}

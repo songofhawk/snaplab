@@ -3,6 +3,7 @@ import {
     Crop as CropIcon,
     Scan,
     Pen,
+    Type,
     Download,
     Copy,
     RotateCw,
@@ -114,6 +115,13 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                         title="Draw"
                     >
                         <Pen className="w-5 h-5" />
+                    </button>
+                    <button
+                        onClick={() => toggleMode('TEXT')}
+                        className={toolButtonClass('TEXT')}
+                        title="Add Text"
+                    >
+                        <Type className="w-5 h-5" />
                     </button>
                     <button
                         onClick={() => toggleMode('PIXEL_EDIT')}
