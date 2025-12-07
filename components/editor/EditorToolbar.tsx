@@ -89,6 +89,24 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
                     <div className="h-6 w-px bg-slate-700 mx-2 self-center"></div>
 
+                    {/* Transform */}
+                    <button
+                        onClick={onRotate}
+                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                        title="Rotate 90°"
+                    >
+                        <RotateCw className="w-5 h-5" />
+                    </button>
+                    <button
+                        onClick={onFlipHorizontal}
+                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                        title="Flip Horizontal"
+                    >
+                        <FlipHorizontal className="w-5 h-5" />
+                    </button>
+
+                    <div className="h-6 w-px bg-slate-700 mx-2 self-center"></div>
+
                     {/* Drawing / Erasing */}
                     <button
                         onClick={() => toggleMode('ANNOTATE')}
@@ -111,34 +129,12 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                     >
                         <ImageOff className="w-5 h-5" />
                     </button>
-
-                    <div className="h-6 w-px bg-slate-700 mx-2 self-center"></div>
-
-                    {/* AI Tools */}
                     <button
                         onClick={() => toggleMode('SEGMENT')}
                         className={toolButtonClass('SEGMENT')}
                         title="Segment Anything"
                     >
                         <Target className="w-5 h-5" />
-                    </button>
-
-                    <div className="h-6 w-px bg-slate-700 mx-2 self-center"></div>
-
-                    {/* Transform */}
-                    <button
-                        onClick={onRotate}
-                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-                        title="Rotate 90°"
-                    >
-                        <RotateCw className="w-5 h-5" />
-                    </button>
-                    <button
-                        onClick={onFlipHorizontal}
-                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-                        title="Flip Horizontal"
-                    >
-                        <FlipHorizontal className="w-5 h-5" />
                     </button>
 
                     <div className="h-6 w-px bg-slate-700 mx-2 self-center"></div>
@@ -151,6 +147,9 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                     >
                         <Grid className="w-5 h-5" />
                     </button>
+
+                    <div className="h-6 w-px bg-slate-700 mx-2 self-center"></div>
+
                     <button
                         onClick={onCopy}
                         disabled={isLoading}
