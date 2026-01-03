@@ -5,11 +5,6 @@ import 'react-image-crop/dist/ReactCrop.css';
 // Types
 import {
     EditMode,
-    BgToolType,
-    PixelEditMode,
-    SamModelType,
-    SamPoint,
-    SamMaskData,
     ResizeDimensions
 } from '../types/editor';
 
@@ -25,8 +20,7 @@ import { EditorCanvas } from './editor/EditorCanvas';
 import { ZoomControls } from './editor/ZoomControls';
 
 // Services
-import { floodFill, removeBackgroundAuto, filterLargestComponent } from '../services/imageProcessing';
-import { loadSAMModel, computeEmbeddings, generateMask, SAM_MODELS } from '../services/samService';
+
 
 interface TextObject {
     id: string;
@@ -35,6 +29,8 @@ interface TextObject {
     y: number;
     color: string;
     fontSize: number;
+    rotation: number; // 旋转角度（度）
+    width?: number; // 文本宽度（用于缩放计算）
 }
 
 interface ImageEditorProps {
@@ -45,11 +41,12 @@ interface ImageEditorProps {
     onChangeImage?: () => void;
 }
 
-export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSplit, onCancel, onChangeImage }) => {
+const ImageEditorComponent: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSplit, onCancel, onChangeImage }) => {
     // --- Refs ---
     const imgRef = useRef<HTMLImageElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+
 
     // --- History Hook ---
     const {
@@ -107,45 +104,58 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
     const [color, setColor] = useState('#ff0000');
     const [lineWidth, setLineWidth] = useState(4);
 
-    // --- Background State ---
-    const [bgTool, setBgTool] = useState<BgToolType>(null);
-    const [tolerance, setTolerance] = useState(30);
 
-    // --- Segment State ---
-    const [samPoints, setSamPoints] = useState<SamPoint[]>([]);
-    const [samMask, setSamMask] = useState<SamMaskData | null>(null);
-    const [isSamReady, setIsSamReady] = useState(false);
-    const [isSamInitializing, setIsSamInitializing] = useState(false);
-    const [samModel, setSamModel] = useState<SamModelType>('FAST');
-    const [isGeneratingMask, setIsGeneratingMask] = useState(false);
 
     // --- Pixel Edit State ---
     const [pixelBrushSize, setPixelBrushSize] = useState(10);
     const [isErasingPixel, setIsErasingPixel] = useState(false);
-    const [pixelMode, setPixelMode] = useState<PixelEditMode>('ERASE');
+    const [pixelMode, setPixelMode] = useState<'ERASE' | 'RESTORE'>('ERASE');
 
     // --- Canvas Modified State (track unsaved changes) ---
     const [canvasModified, setCanvasModified] = useState(false);
 
     // --- Text State ---
+    // Use ref as source of truth to avoid React StrictMode double-render issues
+    const textObjectsRef = useRef<TextObject[]>([]);
     const [textObjects, setTextObjects] = useState<TextObject[]>([]);
     const [textColor, setTextColor] = useState('#ffffff');
     const [textFontSize, setTextFontSize] = useState(32);
     const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
     const [isEditingText, setIsEditingText] = useState(false);
+    const [editingPosition, setEditingPosition] = useState<{ x: number; y: number; canvasX?: number; canvasY?: number } | null>(null);
+    const [editingValue, setEditingValue] = useState('');
+    const [isDraggingText, setIsDraggingText] = useState(false);
+    const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+    const [isResizingText, setIsResizingText] = useState(false);
+    const textInputRef = useRef<HTMLInputElement>(null);
+
+    // Note: We update state immediately when ref changes, so no sync effect needed
+
+
+    // Update toolbar controls when text is selected
+    useEffect(() => {
+        if (selectedTextId) {
+            const textObj = textObjectsRef.current.find(t => t.id === selectedTextId);
+            if (textObj) {
+                setTextColor(textObj.color);
+                setTextFontSize(textObj.fontSize);
+            }
+        }
+    }, [selectedTextId]);
+
 
     // ========================
     // 工具状态统一管理
     // ========================
-    
+
     // 判断某个模式是否是 canvas 编辑模式（直接在 canvas 上操作）
-    const isCanvasEditMode = useCallback((m: EditMode, bg: BgToolType = null): boolean => {
-        return m === 'ANNOTATE' || m === 'TEXT' || m === 'PIXEL_EDIT' || (m === 'BACKGROUND' && bg === 'magic');
+    const isCanvasEditMode = useCallback((m: EditMode): boolean => {
+        return m === 'ANNOTATE' || m === 'TEXT' || m === 'PIXEL_EDIT';
     }, []);
 
     // 判断某个模式是否需要清理透明像素的 RGB 值
-    const needsTransparencyCleanup = useCallback((m: EditMode, bg: BgToolType = null): boolean => {
-        return m === 'PIXEL_EDIT' || (m === 'BACKGROUND' && bg === 'magic');
+    const needsTransparencyCleanup = useCallback((m: EditMode): boolean => {
+        return m === 'PIXEL_EDIT';
     }, []);
 
     // 清理透明像素的 RGB 值（设为 0,0,0）
@@ -170,25 +180,20 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
         if (!ctx) return false;
 
         // 如果需要清理透明像素
-        if (needsTransparencyCleanup(mode, bgTool)) {
+        if (needsTransparencyCleanup(mode)) {
             cleanupTransparentPixels(ctx, canvas.width, canvas.height);
         }
 
         pushToHistory(canvas.toDataURL('image/png'));
         setCanvasModified(false);
         return true;
-    }, [mode, bgTool, needsTransparencyCleanup, cleanupTransparentPixels, pushToHistory]);
+    }, [mode, needsTransparencyCleanup, cleanupTransparentPixels, pushToHistory]);
 
     // --- Image Load Handler ---
     const onImageLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
         const { width, height } = e.currentTarget;
         setResizeDims({ width, height });
         setCrop(undefined);
-
-        // Reset SAM state on new image
-        setSamPoints([]);
-        setSamMask(null);
-        setIsSamReady(false);
 
         // Only reset zoom if history is at start (new image loaded)
         if (history.length === 1) {
@@ -210,31 +215,24 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
     // --- Mode Change Handler ---
     const handleModeChange = useCallback((newMode: EditMode) => {
         // 统一规则：从任何 canvas 编辑模式切换出去时，如果有未保存的修改，自动保存
-        if (isCanvasEditMode(mode, bgTool) && canvasModified) {
+        if (isCanvasEditMode(mode) && canvasModified) {
             saveCanvasToHistory();
         }
 
         setMode(newMode);
-        if (newMode !== 'SEGMENT') {
-            setSamPoints([]);
-            setSamMask(null);
-        }
-        if (newMode !== 'BACKGROUND') {
-            setBgTool(null);
-        }
+
         if (newMode !== 'TEXT') {
+            textObjectsRef.current = [];
             setTextObjects([]);
             setSelectedTextId(null);
             setIsEditingText(false);
         }
-    }, [mode, bgTool, canvasModified, isCanvasEditMode, saveCanvasToHistory]);
+    }, [mode, canvasModified, isCanvasEditMode, saveCanvasToHistory]);
 
     // --- Cancel Mode Handler ---
     const handleCancelMode = useCallback(() => {
         setMode(null);
-        setSamPoints([]);
-        setSamMask(null);
-        setBgTool(null);
+        textObjectsRef.current = [];
         setTextObjects([]);
         setSelectedTextId(null);
         setIsEditingText(false);
@@ -256,8 +254,6 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
     const handleUndoWithReset = useCallback(() => {
         handleUndo();
         setMode(null);
-        setSamPoints([]);
-        setSamMask(null);
         setCanvasModified(false);
     }, [handleUndo]);
 
@@ -379,7 +375,7 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
     // Canvas Initialization Effect
     // ========================
     useEffect(() => {
-        if ((mode === 'ANNOTATE' || mode === 'TEXT' || (mode === 'BACKGROUND' && bgTool === 'magic') || mode === 'SEGMENT' || mode === 'PIXEL_EDIT') && canvasRef.current && imgRef.current) {
+        if ((mode === 'ANNOTATE' || mode === 'TEXT') && canvasRef.current && imgRef.current) {
             const canvas = canvasRef.current;
             canvas.width = imgRef.current.width;
             canvas.height = imgRef.current.height;
@@ -396,64 +392,63 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
                 ctx.drawImage(imgRef.current, 0, 0, canvas.width, canvas.height);
             } else if (mode === 'TEXT') {
                 ctx.drawImage(imgRef.current, 0, 0, canvas.width, canvas.height);
-                
+
+                // Use ref as source of truth to avoid React StrictMode issues
+                const objectsToRender = textObjectsRef.current;
                 // Draw all text objects
-                textObjects.forEach(textObj => {
+                objectsToRender.forEach((textObj, index) => {
+                    ctx.save();
+
+                    // Set font first to measure text
                     ctx.font = `${textObj.fontSize}px Arial`;
+                    const metrics = ctx.measureText(textObj.text);
+                    const textWidth = metrics.width;
+                    const textHeight = textObj.fontSize;
+
+                    // Apply rotation
+                    if (textObj.rotation) {
+                        ctx.translate(textObj.x, textObj.y);
+                        ctx.rotate((textObj.rotation * Math.PI) / 180);
+                        ctx.translate(-textObj.x, -textObj.y);
+                    }
+
+                    // Draw text
                     ctx.fillStyle = textObj.color;
                     ctx.fillText(textObj.text, textObj.x, textObj.y);
 
-                    // Draw selection box if selected
-                    if (textObj.id === selectedTextId) {
-                        const metrics = ctx.measureText(textObj.text);
-                        const padding = 4;
+                    // Draw selection box and handles if selected
+                    if (textObj.id === selectedTextId && !isEditingText) {
+                        const padding = 8;
+                        const boxX = textObj.x - padding;
+                        const boxY = textObj.y - textHeight - padding;
+                        const boxW = textWidth + padding * 2;
+                        const boxH = textHeight + padding * 2;
+
+                        // Selection box
                         ctx.strokeStyle = '#00ff00';
                         ctx.lineWidth = 2;
-                        ctx.strokeRect(
-                            textObj.x - padding,
-                            textObj.y - textObj.fontSize - padding,
-                            metrics.width + padding * 2,
-                            textObj.fontSize + padding * 2
-                        );
+                        ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+                        // Corner handles for resizing
+                        const handleSize = 8;
+                        ctx.fillStyle = '#00ff00';
+
+                        // Top-left
+                        ctx.fillRect(boxX - handleSize / 2, boxY - handleSize / 2, handleSize, handleSize);
+                        // Top-right
+                        ctx.fillRect(boxX + boxW - handleSize / 2, boxY - handleSize / 2, handleSize, handleSize);
+                        // Bottom-left
+                        ctx.fillRect(boxX - handleSize / 2, boxY + boxH - handleSize / 2, handleSize, handleSize);
+                        // Bottom-right (resize handle)
+                        ctx.fillStyle = '#ff0000';
+                        ctx.fillRect(boxX + boxW - handleSize / 2, boxY + boxH - handleSize / 2, handleSize, handleSize);
                     }
-                });
-            } else if (mode === 'BACKGROUND' && bgTool === 'magic') {
-                ctx.drawImage(imgRef.current, 0, 0, canvas.width, canvas.height);
-            } else if (mode === 'PIXEL_EDIT') {
-                ctx.drawImage(imgRef.current, 0, 0, canvas.width, canvas.height);
-            } else if (mode === 'SEGMENT') {
-                ctx.drawImage(imgRef.current, 0, 0, canvas.width, canvas.height);
 
-                // Draw Mask if exists
-                if (samMask) {
-                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                    const data = imageData.data;
-                    const maskData = samMask.data;
-
-                    for (let i = 0; i < maskData.length; i++) {
-                        if (maskData[i] > 0) {
-                            const idx = i * 4;
-                            data[idx] = data[idx] * 0.5;
-                            data[idx + 1] = data[idx + 1] * 0.5 + 100;
-                            data[idx + 2] = data[idx + 2] * 0.5 + 200;
-                        }
-                    }
-                    ctx.putImageData(imageData, 0, 0);
-                }
-
-                // Draw Points
-                samPoints.forEach(p => {
-                    ctx.fillStyle = p.label === 1 ? '#00ff00' : '#ff0000';
-                    ctx.beginPath();
-                    ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
-                    ctx.fill();
-                    ctx.strokeStyle = 'white';
-                    ctx.lineWidth = 2;
-                    ctx.stroke();
+                    ctx.restore();
                 });
             }
         }
-    }, [mode, currentSrc, bgTool, samPoints, samMask, color, lineWidth, textObjects, selectedTextId]);
+    }, [mode, currentSrc, color, lineWidth, selectedTextId]);
 
     // Update context style when color/width changes
     useEffect(() => {
@@ -466,191 +461,9 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
         }
     }, [color, lineWidth, mode]);
 
-    // ========================
-    // Background Removal Logic
-    // ========================
-    const handleAutoRemoveBg = useCallback(async () => {
-        if (!currentSrc) return;
-        setIsLoading(true);
-        setLoadingText("Removing background...");
-        try {
-            const newSrc = await removeBackgroundAuto(currentSrc);
-            pushToHistory(newSrc);
-            setMode(null);
-        } catch (error) {
-            console.error("Auto remove failed", error);
-            alert("Failed to remove background automatically.");
-        } finally {
-            setIsLoading(false);
-            setLoadingText(null);
-        }
-    }, [currentSrc, pushToHistory]);
 
-    const handleMagicWand = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        if (!ctx) return;
 
-        const coords = getCanvasCoordinates(e.clientX, e.clientY, canvas);
-        const x = Math.floor(coords.x);
-        const y = Math.floor(coords.y);
 
-        floodFill(ctx, x, y, tolerance);
-        setCanvasModified(true);
-    }, [getCanvasCoordinates, tolerance]);
-
-    const applyBackgroundChanges = useCallback(() => {
-        if (saveCanvasToHistory()) {
-            setMode(null);
-            setBgTool(null);
-        }
-    }, [saveCanvasToHistory]);
-
-    // ========================
-    // Segment Anything Logic
-    // ========================
-    const initSam = useCallback(async () => {
-        if (isSamReady || isSamInitializing) {
-            console.log('SAM already ready or initializing, skipping...');
-            return;
-        }
-
-        setIsSamInitializing(true);
-        setIsLoading(true);
-        setLoadingText("Loading AI Model (this may take a while)...");
-        try {
-            const modelId = samModel === 'FAST' ? SAM_MODELS.FAST : SAM_MODELS.HIGH_QUALITY;
-
-            await loadSAMModel(modelId, (progress) => {
-                setLoadingText(`Loading Model: ${Math.round(progress)}%`);
-            });
-
-            setLoadingText("Computing Image Embeddings...");
-            await computeEmbeddings(currentSrc);
-
-            setIsSamReady(true);
-        } catch (error) {
-            console.error("SAM Init failed", error);
-            alert(`初始化失败: ${error instanceof Error ? error.message : '未知错误'}`);
-            setMode(null);
-        } finally {
-            setIsLoading(false);
-            setLoadingText(null);
-            setIsSamInitializing(false);
-        }
-    }, [isSamReady, isSamInitializing, samModel, currentSrc]);
-
-    const handleSamClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-        if (!isSamReady) return;
-
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const rect = canvas.getBoundingClientRect();
-
-        const coords = getCanvasCoordinates(e.clientX, e.clientY, canvas);
-        const scaleX = canvas.width / rect.width;
-        const scaleY = canvas.height / rect.height;
-
-        const x = coords.x * scaleX;
-        const y = coords.y * scaleY;
-
-        const label = e.shiftKey ? 0 : 1;
-        setSamPoints(prev => [...prev, { x, y, label }]);
-    }, [isSamReady, getCanvasCoordinates]);
-
-    const handleGenerateMask = useCallback(async () => {
-        if (samPoints.length === 0) return;
-        setIsGeneratingMask(true);
-        
-        try {
-            const mask = await generateMask(samPoints);
-            setSamMask(mask);
-        } catch (error) {
-            console.error("Mask generation failed", error);
-            alert("Failed to generate mask. See console for details.");
-        } finally {
-            setIsGeneratingMask(false);
-        }
-    }, [samPoints]);
-
-    const applySamMask = useCallback(() => {
-        if (!samMask || !imgRef.current) return;
-
-        const canvas = document.createElement('canvas');
-        canvas.width = imgRef.current.width;
-        canvas.height = imgRef.current.height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-
-        ctx.drawImage(imgRef.current, 0, 0);
-
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const data = imageData.data;
-        const filteredMaskData = filterLargestComponent(samMask.data, samMask.width, samMask.height);
-
-        if (filteredMaskData.length !== data.length / 4) {
-            console.error("Mask dimensions mismatch!");
-            return;
-        }
-
-        for (let i = 0; i < filteredMaskData.length; i++) {
-            if (filteredMaskData[i] <= 0.0) {
-                data[i * 4 + 3] = 0;
-            }
-        }
-
-        ctx.putImageData(imageData, 0, 0);
-        pushToHistory(canvas.toDataURL('image/png'));
-        setMode(null);
-        setSamPoints([]);
-        setSamMask(null);
-    }, [samMask, pushToHistory]);
-
-    // Trigger SAM init when entering mode
-    useEffect(() => {
-        if (mode === 'SEGMENT' && !isSamReady && !isSamInitializing) {
-            initSam();
-        }
-    }, [mode, isSamReady, isSamInitializing, initSam]);
-
-    // ========================
-    // Pixel Eraser Logic
-    // ========================
-    const handlePixelEraser = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-        const canvas = canvasRef.current;
-        if (!canvas || !imgRef.current) return;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-
-        const coords = getCanvasCoordinates(e.clientX, e.clientY, canvas);
-        const rect = canvas.getBoundingClientRect();
-        const scaleX = canvas.width / imgRef.current.width;
-        const scaleY = canvas.height / imgRef.current.height;
-
-        const x = coords.x * scaleX;
-        const y = coords.y * scaleY;
-
-        ctx.save();
-        if (pixelMode === 'ERASE') {
-            ctx.globalCompositeOperation = 'destination-out';
-            ctx.beginPath();
-            ctx.arc(x, y, pixelBrushSize / 2, 0, Math.PI * 2);
-            ctx.fill();
-        } else {
-            // RESTORE: 从原始图像恢复，而不是从当前图像恢复
-            // 这样即使经过 magic wand 或 AI 去除背景后，仍然可以恢复原始颜色
-            const restoreSource = originalImgRef.current || imgRef.current;
-            ctx.globalCompositeOperation = 'source-over';
-            ctx.beginPath();
-            ctx.arc(x, y, pixelBrushSize / 2, 0, Math.PI * 2);
-            ctx.clip();
-            // 需要根据原始图像尺寸正确缩放
-            ctx.drawImage(restoreSource, 0, 0, canvas.width, canvas.height);
-        }
-        ctx.restore();
-        setCanvasModified(true);
-    }, [getCanvasCoordinates, pixelMode, pixelBrushSize]);
 
     // ========================
     // Text Editing Logic (must be before Drawing Logic)
@@ -661,12 +474,14 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
         const ctx = canvas.getContext('2d');
         if (!ctx) return null;
 
+        // Use ref as source of truth
+        const objectsToCheck = textObjectsRef.current;
         // Check from top to bottom (reverse order, so top text is checked first)
-        for (let i = textObjects.length - 1; i >= 0; i--) {
-            const textObj = textObjects[i];
+        for (let i = objectsToCheck.length - 1; i >= 0; i--) {
+            const textObj = objectsToCheck[i];
             ctx.font = `${textObj.fontSize}px Arial`;
             const metrics = ctx.measureText(textObj.text);
-            
+
             if (
                 x >= textObj.x &&
                 x <= textObj.x + metrics.width &&
@@ -677,9 +492,133 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
             }
         }
         return null;
-    }, [textObjects]);
+    }, []);
 
     const handleTextClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        // Get display coordinates (what user sees on screen)
+        const coords = getCanvasCoordinates(e.clientX, e.clientY, canvas);
+
+        // Check if clicked on existing text (use canvas coordinates for hit testing)
+        const scaleX = canvas.width / imgRef.current!.width;
+        const scaleY = canvas.height / imgRef.current!.height;
+        const canvasX = coords.x * scaleX;
+        const canvasY = coords.y * scaleY;
+
+        const clickedText = findTextAtPosition(canvasX, canvasY);
+
+        if (clickedText) {
+            // Select existing text
+            setSelectedTextId(clickedText.id);
+            setIsEditingText(false);
+            setEditingPosition(null);
+        } else {
+            // Store display coordinates for input box positioning
+            // Canvas coordinates for actual text rendering
+            setEditingPosition({
+                x: coords.x,  // Display X for input box
+                y: coords.y,  // Display Y for input box
+                canvasX: canvasX,  // Canvas X for text rendering
+                canvasY: canvasY   // Canvas Y for text rendering
+            });
+            setEditingValue('');
+            setIsEditingText(true);
+            setSelectedTextId(null);
+            // Focus input after state update
+            setTimeout(() => {
+                textInputRef.current?.focus();
+            }, 100);
+        }
+    }, [getCanvasCoordinates, findTextAtPosition]);
+
+    const handleEditSelectedText = useCallback(() => {
+        if (!selectedTextId) return;
+
+        const textObj = textObjectsRef.current.find(t => t.id === selectedTextId);
+        if (!textObj) return;
+
+        // Set editing mode with existing text (textObj.x and textObj.y are already in canvas coordinates)
+        setEditingPosition({ x: textObj.x, y: textObj.y });
+        setEditingValue(textObj.text);
+        setIsEditingText(true);
+
+        // Remove the text object temporarily while editing
+        setTextObjects(prev => prev.filter(t => t.id !== selectedTextId));
+        setSelectedTextId(null);
+
+        setTimeout(() => {
+            textInputRef.current?.focus();
+            textInputRef.current?.select();
+        }, 100);
+    }, [selectedTextId, textObjects]);
+
+    const handleDeleteSelectedText = useCallback(() => {
+        if (!selectedTextId) return;
+
+        const updated = textObjectsRef.current.filter(t => t.id !== selectedTextId);
+        textObjectsRef.current = updated;
+        setTextObjects(updated);
+        setSelectedTextId(null);
+        setCanvasModified(true);
+    }, [selectedTextId]);
+
+    const finishTextInput = useCallback((text?: string) => {
+        // Use provided text or fallback to editingValue
+        const finalText = text ?? editingValue;
+
+        // If no value, just close the input
+        if (!finalText.trim()) {
+            setIsEditingText(false);
+            setEditingPosition(null);
+            setEditingValue('');
+            return;
+        }
+
+        if (!editingPosition) {
+            setIsEditingText(false);
+            setEditingValue('');
+            return;
+        }
+
+        // Use canvas coordinates for text rendering
+        const canvasX = editingPosition.canvasX ?? editingPosition.x;
+        const canvasY = editingPosition.canvasY ?? editingPosition.y;
+
+        const newTextObj: TextObject = {
+            id: `text-${Date.now()}`,
+            text: finalText,
+            x: canvasX,
+            y: canvasY,
+            color: textColor,
+            fontSize: textFontSize,
+            rotation: 0
+        };
+
+        // Update ref first (source of truth)
+        const currentObjects = textObjectsRef.current;
+        const newArr = [...currentObjects, newTextObj];
+
+        // Update ref immediately (source of truth)
+        textObjectsRef.current = newArr;
+
+        // Then update state (for rendering)
+        setTextObjects(newArr);
+
+        // Update other states
+        setSelectedTextId(newTextObj.id);
+        setCanvasModified(true);
+
+        // Clear editing state immediately (input box will disappear)
+        setIsEditingText(false);
+        setEditingPosition(null);
+        setEditingValue('');
+    }, [editingPosition, editingValue, textColor, textFontSize]);
+
+    const handleTextMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+        if (!selectedTextId || isEditingText) return;
+
         const canvas = canvasRef.current;
         if (!canvas) return;
 
@@ -690,58 +629,130 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
         const x = coords.x * scaleX;
         const y = coords.y * scaleY;
 
-        // Check if clicked on existing text
-        const clickedText = findTextAtPosition(x, y);
-        
-        if (clickedText) {
-            // Select existing text
-            setSelectedTextId(clickedText.id);
-            setIsEditingText(false);
-        } else {
-            // Add new text
-            const newText = prompt('Enter text:');
-            if (newText && newText.trim()) {
-                const newTextObj: TextObject = {
-                    id: `text-${Date.now()}`,
-                    text: newText,
-                    x,
-                    y,
-                    color: textColor,
-                    fontSize: textFontSize
-                };
-                setTextObjects(prev => [...prev, newTextObj]);
-                setSelectedTextId(newTextObj.id);
-                setCanvasModified(true);
-            }
-        }
-    }, [getCanvasCoordinates, findTextAtPosition, textColor, textFontSize]);
-
-    const handleEditSelectedText = useCallback(() => {
-        if (!selectedTextId) return;
-        
-        const textObj = textObjects.find(t => t.id === selectedTextId);
+        const textObj = textObjectsRef.current.find(t => t.id === selectedTextId);
         if (!textObj) return;
 
-        const newText = prompt('Edit text:', textObj.text);
-        if (newText !== null && newText.trim()) {
-            setTextObjects(prev => prev.map(t => 
-                t.id === selectedTextId ? { ...t, text: newText } : t
-            ));
+        // Measure text to get bounds
+        const tempCanvas = document.createElement('canvas');
+        const ctx = tempCanvas.getContext('2d');
+        if (!ctx) return;
+
+        ctx.font = `${textObj.fontSize}px Arial`;
+        const metrics = ctx.measureText(textObj.text);
+        const textWidth = metrics.width;
+        const textHeight = textObj.fontSize;
+
+        const padding = 8;
+        const boxX = textObj.x - padding;
+        const boxY = textObj.y - textHeight - padding;
+        const boxW = textWidth + padding * 2;
+        const boxH = textHeight + padding * 2;
+
+        const handleSize = 8;
+        const resizeHandleX = boxX + boxW;
+        const resizeHandleY = boxY + boxH;
+
+        // Check if clicked on resize handle (bottom-right)
+        if (Math.abs(x - resizeHandleX) < handleSize && Math.abs(y - resizeHandleY) < handleSize) {
+            setIsResizingText(true);
+            e.stopPropagation();
+            return;
+        }
+
+        // Check if clicked on the text
+        const clickedText = findTextAtPosition(x, y);
+        if (clickedText && clickedText.id === selectedTextId) {
+            setIsDraggingText(true);
+            setDragOffset({
+                x: x - textObj.x,
+                y: y - textObj.y
+            });
+            e.stopPropagation();
+        }
+    }, [selectedTextId, isEditingText, getCanvasCoordinates, textObjects, findTextAtPosition]);
+
+    const handleTextMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+        if (!selectedTextId) return;
+
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const coords = getCanvasCoordinates(e.clientX, e.clientY, canvas);
+        const scaleX = canvas.width / imgRef.current!.width;
+        const scaleY = canvas.height / imgRef.current!.height;
+
+        const x = coords.x * scaleX;
+        const y = coords.y * scaleY;
+
+        if (isDraggingText) {
+            const updated = textObjectsRef.current.map(t =>
+                t.id === selectedTextId
+                    ? { ...t, x: x - dragOffset.x, y: y - dragOffset.y }
+                    : t
+            );
+            textObjectsRef.current = updated;
+            setTextObjects(updated);
+            setCanvasModified(true);
+        } else if (isResizingText) {
+            const textObj = textObjectsRef.current.find(t => t.id === selectedTextId);
+            if (!textObj) return;
+
+            // Calculate distance from text origin to mouse
+            const dx = x - textObj.x;
+            const dy = y - textObj.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            // Map distance to font size (minimum 12, maximum 200)
+            const newFontSize = Math.max(12, Math.min(200, Math.round(distance / 3)));
+
+            const updated = textObjectsRef.current.map(t =>
+                t.id === selectedTextId
+                    ? { ...t, fontSize: newFontSize }
+                    : t
+            );
+            textObjectsRef.current = updated;
+            setTextObjects(updated);
             setCanvasModified(true);
         }
-    }, [selectedTextId, textObjects]);
+    }, [isDraggingText, isResizingText, selectedTextId, getCanvasCoordinates, dragOffset]);
 
-    const handleDeleteSelectedText = useCallback(() => {
-        if (!selectedTextId) return;
-        
-        setTextObjects(prev => prev.filter(t => t.id !== selectedTextId));
-        setSelectedTextId(null);
-        setCanvasModified(true);
-    }, [selectedTextId]);
+    const handleTextMouseUp = useCallback(() => {
+        setIsDraggingText(false);
+        setIsResizingText(false);
+    }, []);
 
     const applyText = useCallback(() => {
+        const canvas = canvasRef.current;
+        if (!canvas || !imgRef.current) return;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        // Draw image first
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(imgRef.current, 0, 0, canvas.width, canvas.height);
+
+        // Draw all text objects onto the canvas (use ref as source of truth)
+        textObjectsRef.current.forEach(textObj => {
+            ctx.save();
+
+            if (textObj.rotation) {
+                ctx.translate(textObj.x, textObj.y);
+                ctx.rotate((textObj.rotation * Math.PI) / 180);
+                ctx.translate(-textObj.x, -textObj.y);
+            }
+
+            ctx.font = `${textObj.fontSize}px Arial`;
+            ctx.fillStyle = textObj.color;
+            ctx.fillText(textObj.text, textObj.x, textObj.y);
+
+            ctx.restore();
+        });
+
+        // Save the canvas with text merged into the image
         if (saveCanvasToHistory()) {
             setMode(null);
+            textObjectsRef.current = [];
             setTextObjects([]);
             setSelectedTextId(null);
             setIsEditingText(false);
@@ -770,21 +781,37 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
     // Drawing Logic
     // ========================
     const startDrawing = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-        if (mode === 'BACKGROUND' && bgTool === 'magic') {
-            handleMagicWand(e);
-            return;
-        }
-        if (mode === 'SEGMENT') {
-            handleSamClick(e);
-            return;
-        }
-        if (mode === 'PIXEL_EDIT') {
-            setIsErasingPixel(true);
-            handlePixelEraser(e);
-            return;
-        }
         if (mode === 'TEXT') {
-            handleTextClick(e);
+            if (isEditingText) {
+                return; // Don't interfere with text input
+            }
+
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+
+            const coords = getCanvasCoordinates(e.clientX, e.clientY, canvas);
+            const scaleX = canvas.width / imgRef.current!.width;
+            const scaleY = canvas.height / imgRef.current!.height;
+            const x = coords.x * scaleX;
+            const y = coords.y * scaleY;
+
+            // Check if clicked on existing text
+            const clickedText = findTextAtPosition(x, y);
+
+            if (clickedText) {
+                // If clicking on selected text, prepare for dragging
+                if (clickedText.id === selectedTextId) {
+                    handleTextMouseDown(e);
+                } else {
+                    // Select different text
+                    setSelectedTextId(clickedText.id);
+                    setEditingPosition(null);
+                    setIsEditingText(false);
+                }
+            } else {
+                // Click on empty space - create new text
+                handleTextClick(e);
+            }
             return;
         }
 
@@ -797,12 +824,11 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
         const coords = getCanvasCoordinates(e.clientX, e.clientY, canvas);
         ctx.beginPath();
         ctx.moveTo(coords.x, coords.y);
-    }, [mode, bgTool, getCanvasCoordinates, handleMagicWand, handleSamClick, handlePixelEraser, handleTextClick]);
+    }, [mode, getCanvasCoordinates, handleTextClick, handleTextMouseDown, isEditingText, isDraggingText, findTextAtPosition, selectedTextId]);
 
     const draw = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-        if (mode === 'BACKGROUND' || mode === 'SEGMENT' || mode === 'TEXT') return;
-        if (mode === 'PIXEL_EDIT') {
-            if (isErasingPixel) handlePixelEraser(e);
+        if (mode === 'TEXT') {
+            handleTextMouseMove(e);
             return;
         }
         if (!isDrawing) return;
@@ -815,12 +841,12 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
         ctx.lineTo(coords.x, coords.y);
         ctx.stroke();
         setCanvasModified(true);
-    }, [mode, isDrawing, isErasingPixel, getCanvasCoordinates, handlePixelEraser]);
+    }, [mode, isDrawing, getCanvasCoordinates, handleTextMouseMove]);
 
     const stopDrawing = useCallback(() => {
         setIsDrawing(false);
-        setIsErasingPixel(false);
-    }, []);
+        handleTextMouseUp();
+    }, [handleTextMouseUp]);
 
     const applyAnnotation = useCallback(() => {
         if (saveCanvasToHistory()) {
@@ -832,162 +858,283 @@ export const ImageEditor: React.FC<ImageEditorProps> = ({ imageSrc, onSave, onSp
     // Render
     // ========================
     return (
-        <div className="flex flex-col h-full w-full bg-slate-950">
-            {/* Toolbar */}
-            <EditorToolbar
-                mode={mode}
-                setMode={handleModeChange}
-                currentStep={currentStep}
-                isLoading={isLoading}
-                canvasModified={canvasModified}
-                onUndo={handleUndoWithReset}
-                onRotate={rotateImage}
-                onFlipHorizontal={flipHorizontal}
-                onChangeImage={onChangeImage}
-                onCopy={async () => {
-                    try {
+        <div className="flex flex-row h-full w-full bg-slate-950 overflow-hidden">
+            {/* Left Sidebar: Toolbar */}
+            <div className="w-20 flex-none bg-slate-900 border-r border-slate-800 z-30 relative flex flex-col items-center">
+                <EditorToolbar
+                    mode={mode}
+                    setMode={handleModeChange}
+                    currentStep={currentStep}
+                    isLoading={isLoading}
+                    canvasModified={canvasModified}
+                    onUndo={handleUndoWithReset}
+                    onRotate={rotateImage}
+                    onFlipHorizontal={flipHorizontal}
+                    onChangeImage={onChangeImage}
+                    onCopy={async () => {
+                        try {
+                            let srcToUse = currentSrc;
+                            if (isCanvasEditMode(mode) && canvasRef.current) {
+                                srcToUse = canvasRef.current.toDataURL('image/png');
+                                if (canvasModified) {
+                                    saveCanvasToHistory();
+                                    setMode(null);
+                                }
+                            }
+                            const response = await fetch(srcToUse);
+                            const blob = await response.blob();
+                            await navigator.clipboard.write([
+                                new ClipboardItem({ [blob.type]: blob })
+                            ]);
+                        } catch (err) {
+                            console.error('Failed to copy image:', err);
+                        }
+                    }}
+                    onDownload={() => {
                         let srcToUse = currentSrc;
-                        // 统一规则：如果当前是 canvas 编辑模式且有修改，先保存
-                        if (isCanvasEditMode(mode, bgTool) && canvasRef.current) {
+                        if (isCanvasEditMode(mode) && canvasRef.current) {
                             srcToUse = canvasRef.current.toDataURL('image/png');
                             if (canvasModified) {
                                 saveCanvasToHistory();
                                 setMode(null);
                             }
                         }
-                        const response = await fetch(srcToUse);
-                        const blob = await response.blob();
-                        await navigator.clipboard.write([
-                            new ClipboardItem({ [blob.type]: blob })
-                        ]);
-                    } catch (err) {
-                        console.error('Failed to copy image:', err);
-                    }
-                }}
-                onDownload={() => {
-                    let srcToUse = currentSrc;
-                    // 统一规则：如果当前是 canvas 编辑模式且有修改，先保存
-                    if (isCanvasEditMode(mode, bgTool) && canvasRef.current) {
-                        srcToUse = canvasRef.current.toDataURL('image/png');
-                        if (canvasModified) {
-                            saveCanvasToHistory();
-                            setMode(null);
-                        }
-                    }
-                    const link = document.createElement('a');
-                    link.download = `edited-image-${Date.now()}.png`;
-                    link.href = srcToUse;
-                    link.click();
-                }}
-                onSplit={() => onSplit(currentSrc)}
-            />
-
-            {/* Options Bar */}
-            <EditorOptionsBar
-                mode={mode}
-                onCancel={handleCancelMode}
-                // Crop
-                onSetCropAspect={setAspectCrop}
-                onApplyCrop={applyCrop}
-                // Resize
-                resizeDims={resizeDims}
-                maintainAspect={maintainAspect}
-                onResizeDimensionChange={handleResizeDimensionChange}
-                onMaintainAspectChange={setMaintainAspect}
-                onSetResizePercent={setResizePercent}
-                onApplyResize={applyResize}
-                // Annotate
-                annotateColor={color}
-                annotateLineWidth={lineWidth}
-                onAnnotateColorChange={setColor}
-                onAnnotateLineWidthChange={setLineWidth}
-                onApplyAnnotation={applyAnnotation}
-                // Text
-                textColor={textColor}
-                textFontSize={textFontSize}
-                onTextColorChange={setTextColor}
-                onTextFontSizeChange={setTextFontSize}
-                onApplyText={applyText}
-                // Pixel Edit
-                pixelMode={pixelMode}
-                pixelBrushSize={pixelBrushSize}
-                onPixelModeChange={setPixelMode}
-                onPixelBrushSizeChange={setPixelBrushSize}
-                // Background
-                bgTool={bgTool}
-                tolerance={tolerance}
-                onBgToolChange={setBgTool}
-                onToleranceChange={setTolerance}
-                onAutoRemoveBg={handleAutoRemoveBg}
-                onApplyBackground={applyBackgroundChanges}
-                // Segment
-                samModel={samModel}
-                samPointsCount={samPoints.length}
-                hasSamMask={!!samMask}
-                isLoading={isLoading}
-                isGeneratingMask={isGeneratingMask}
-                onSamModelChange={setSamModel}
-                onGenerateMask={handleGenerateMask}
-                onApplySamMask={applySamMask}
-            />
-
-            {/* Main Area */}
-            <div
-                ref={containerRef}
-                className="flex-1 overflow-hidden p-8 relative bg-slate-900 cursor-move flex items-center justify-center"
-                onMouseDown={handleMouseDownPan}
-                onMouseMove={handleMouseMovePan}
-                onMouseUp={handleMouseUpPan}
-                onMouseLeave={handleMouseUpPan}
-            >
-                {/* Zoom Controls */}
-                <ZoomControls
-                    zoom={zoom}
-                    onZoomIn={zoomIn}
-                    onZoomOut={zoomOut}
-                    onResetView={resetView}
+                        const link = document.createElement('a');
+                        link.download = `edited-image-${Date.now()}.png`;
+                        link.href = srcToUse;
+                        link.click();
+                    }}
+                    onSplit={() => onSplit(currentSrc)}
                 />
+            </div>
 
-                {/* Loading Overlay */}
-                {isLoading && (
-                    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-                        <div className="flex flex-col items-center gap-4">
-                            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500"></div>
-                            <p className="text-cyan-400 font-medium animate-pulse">{loadingText || "Processing..."}</p>
+            {/* Right Main Content */}
+            <div className="flex-1 flex flex-col min-w-0 bg-slate-950 relative">
+
+                {/* Top Bar: Options */}
+                <div className="h-14 flex-none border-b border-slate-800 bg-slate-900 z-20 relative">
+                    <EditorOptionsBar
+                        mode={mode}
+                        onCancel={handleCancelMode}
+                        // Crop
+                        onSetCropAspect={setAspectCrop}
+                        onApplyCrop={applyCrop}
+                        // Resize
+                        resizeDims={resizeDims}
+                        maintainAspect={maintainAspect}
+                        onResizeDimensionChange={handleResizeDimensionChange}
+                        onMaintainAspectChange={setMaintainAspect}
+                        onSetResizePercent={setResizePercent}
+                        onApplyResize={applyResize}
+                        // Annotate
+                        annotateColor={color}
+                        annotateLineWidth={lineWidth}
+                        onAnnotateColorChange={setColor}
+                        onAnnotateLineWidthChange={setLineWidth}
+                        onApplyAnnotation={applyAnnotation}
+                        // Text
+                        textColor={textColor}
+                        textFontSize={textFontSize}
+                        onTextColorChange={(color) => {
+                            setTextColor(color);
+                            // Update selected text color
+                            if (selectedTextId) {
+                                const updated = textObjectsRef.current.map(t =>
+                                    t.id === selectedTextId ? { ...t, color } : t
+                                );
+                                textObjectsRef.current = updated;
+                                setTextObjects(updated);
+                                setCanvasModified(true);
+                            }
+                        }}
+                        onTextFontSizeChange={(size) => {
+                            setTextFontSize(size);
+                            // Update selected text size
+                            if (selectedTextId) {
+                                const updated = textObjectsRef.current.map(t =>
+                                    t.id === selectedTextId ? { ...t, fontSize: size } : t
+                                );
+                                textObjectsRef.current = updated;
+                                setTextObjects(updated);
+                                setCanvasModified(true);
+                            }
+                        }}
+                        onApplyText={applyText}
+                        // Pixel Edit
+                        pixelMode={null} // TODO: Add correct logic if missing
+                        pixelBrushSize={0} // Placeholder
+                        onPixelModeChange={() => { }}
+                        onPixelBrushSizeChange={() => { }}
+                        // Background
+                        bgTool={null} // TODO: Add correct logic if missing
+                        tolerance={10} // Placeholder
+                        onBgToolChange={() => { }}
+                        onToleranceChange={() => { }}
+                        onAutoRemoveBg={() => { }}
+                        onApplyBackground={() => { }}
+                        // Segment
+                        samModel={'b0'} // Placeholder
+                        samPointsCount={0}
+                        hasSamMask={false}
+                        isGeneratingMask={false}
+                        onSamModelChange={() => { }}
+                        onGenerateMask={() => { }}
+                        onApplySamMask={() => { }}
+                    />
+                </div>
+
+                {/* Main Canvas Area */}
+                <div
+                    ref={containerRef}
+                    className="flex-1 w-full relative bg-slate-900 cursor-move flex items-center justify-center overflow-hidden"
+                    onMouseDown={handleMouseDownPan}
+                    onMouseMove={handleMouseMovePan}
+                    onMouseUp={handleMouseUpPan}
+                    onMouseLeave={handleMouseUpPan}
+                >
+                    {/* Zoom Controls */}
+                    <ZoomControls
+                        zoom={zoom}
+                        onZoomIn={zoomIn}
+                        onZoomOut={zoomOut}
+                        onResetView={resetView}
+                    />
+
+                    {/* Loading Overlay */}
+                    {isLoading && (
+                        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+                            <div className="flex flex-col items-center gap-4">
+                                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500"></div>
+                                <p className="text-cyan-400 font-medium animate-pulse">{loadingText || "Processing..."}</p>
+                            </div>
                         </div>
-                    </div>
-                )}
+                    )}
 
-                {/* Generate Mask Overlay */}
-                {isGeneratingMask && (
-                    <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/50 backdrop-blur-[2px]">
-                        <div className="flex flex-col items-center gap-3 bg-slate-900/80 px-6 py-4 rounded-lg border border-purple-500/30">
-                            <div className="animate-spin rounded-full h-8 w-8 border-2 border-purple-500 border-t-transparent"></div>
-                            <p className="text-purple-300 text-sm font-medium">Generating Mask...</p>
+                    {/* In-progress overlays removed */}
+
+                    {/* Canvas */}
+                    <EditorCanvas
+                        currentSrc={currentSrc}
+                        zoom={zoom}
+                        pan={pan}
+                        isPanning={isPanning}
+                        imgRef={imgRef}
+                        canvasRef={canvasRef}
+                        crop={crop}
+                        onCropChange={setCrop}
+                        onCropComplete={setCompletedCrop}
+                        onImageLoad={onImageLoad}
+                        onCanvasMouseDown={startDrawing}
+                        onCanvasMouseMove={draw}
+                        onCanvasMouseUp={stopDrawing}
+                        onCanvasMouseLeave={stopDrawing}
+                    />
+
+                    {/* In-place Text Input */}
+                    {mode === 'TEXT' && isEditingText && editingPosition && (
+                        <div
+                            style={{
+                                position: 'absolute',
+                                left: `${editingPosition.x * zoom + pan.x}px`,
+                                top: `${(editingPosition.y - textFontSize) * zoom + pan.y}px`,
+                                zIndex: 1000,
+                                pointerEvents: 'auto'
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                        >
+                            <input
+                                ref={textInputRef}
+                                type="text"
+                                value={editingValue}
+                                onChange={(e) => {
+                                    setEditingValue(e.target.value);
+                                }}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        const currentValue = e.currentTarget.value.trim();
+
+                                        if (!currentValue) {
+                                            // If empty, just close the input
+                                            setIsEditingText(false);
+                                            setEditingPosition(null);
+                                            setEditingValue('');
+                                            return;
+                                        }
+
+                                        if (!editingPosition) {
+                                            setIsEditingText(false);
+                                            setEditingValue('');
+                                            return;
+                                        }
+
+                                        // Use canvas coordinates for text rendering
+                                        const canvasX = editingPosition.canvasX ?? editingPosition.x;
+                                        const canvasY = editingPosition.canvasY ?? editingPosition.y;
+
+                                        const newTextObj: TextObject = {
+                                            id: `text-${Date.now()}`,
+                                            text: currentValue,
+                                            x: canvasX,
+                                            y: canvasY,
+                                            color: textColor,
+                                            fontSize: textFontSize,
+                                            rotation: 0
+                                        };
+
+                                        // Update ref first (source of truth)
+                                        const currentObjects = textObjectsRef.current;
+                                        const newArr = [...currentObjects, newTextObj];
+
+                                        // Update ref immediately (source of truth)
+                                        textObjectsRef.current = newArr;
+
+                                        // Then update state (for rendering)
+                                        setTextObjects(newArr);
+
+                                        // Update other states
+                                        setSelectedTextId(newTextObj.id);
+                                        setCanvasModified(true);
+
+                                        // Clear editing state immediately (input box will disappear)
+                                        setIsEditingText(false);
+                                        setEditingPosition(null);
+                                        setEditingValue('');
+                                    } else if (e.key === 'Escape') {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setIsEditingText(false);
+                                        setEditingPosition(null);
+                                        setEditingValue('');
+                                    }
+                                }}
+                                onBlur={() => {
+                                    // Don't auto-close on blur, let user finish with Enter
+                                }}
+                                placeholder="输入文字..."
+                                style={{
+                                    fontSize: `${textFontSize}px`,
+                                    color: textColor,
+                                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                                    border: '2px solid #00ff00',
+                                    outline: 'none',
+                                    padding: '4px 8px',
+                                    fontFamily: 'Arial',
+                                    minWidth: '200px',
+                                    borderRadius: '4px',
+                                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.5)'
+                                }}
+                                autoFocus
+                            />
                         </div>
-                    </div>
-                )}
-
-                {/* Canvas */}
-                <EditorCanvas
-                    mode={mode}
-                    bgTool={bgTool}
-                    currentSrc={currentSrc}
-                    zoom={zoom}
-                    pan={pan}
-                    isPanning={isPanning}
-                    imgRef={imgRef}
-                    canvasRef={canvasRef}
-                    crop={crop}
-                    onCropChange={setCrop}
-                    onCropComplete={setCompletedCrop}
-                    onImageLoad={onImageLoad}
-                    onCanvasMouseDown={startDrawing}
-                    onCanvasMouseMove={draw}
-                    onCanvasMouseUp={stopDrawing}
-                    onCanvasMouseLeave={stopDrawing}
-                />
+                    )}
+                </div>
             </div>
         </div>
     );
 };
+
+// Wrap with React.memo to prevent unnecessary re-renders
+export const ImageEditor = React.memo(ImageEditorComponent);

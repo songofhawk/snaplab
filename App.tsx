@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { Dimensions, AppState, SplitImage, SplitDirection } from './types';
 import { ImageUploader } from './components/ImageUploader';
 import { SplitEditor } from './components/SplitEditor';
@@ -13,6 +13,41 @@ const App: React.FC = () => {
   const [state, setState] = useState<AppState>(AppState.UPLOAD);
   const [originalImageSrc, setOriginalImageSrc] = useState<string | null>(null);
   const [imageDimensions, setImageDimensions] = useState<Dimensions>({ width: 0, height: 0 });
+
+  // Check for pending image from context menu (Side Panel)
+  React.useEffect(() => {
+    // Check if running in extension environment
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get(['pendingImage'], (result) => {
+        if (result.pendingImage) {
+          const imgUrl = result.pendingImage;
+          setLoadingMessage("Loading image from context menu...");
+          setState(AppState.PROCESSING);
+
+          const img = new Image();
+          img.onload = () => {
+            setImageDimensions({ width: img.width, height: img.height });
+            setOriginalImageSrc(img.src);
+            setState(AppState.IMAGE_EDIT);
+            setLoadingMessage(null);
+            // Clear storage so it doesn't reload on refresh
+            chrome.storage.local.remove('pendingImage');
+          };
+          img.onerror = () => {
+            setErrorMsg("Failed to load image from context context.");
+            setState(AppState.UPLOAD);
+            setLoadingMessage(null);
+            chrome.storage.local.remove('pendingImage');
+          };
+          // Handle CORS for external images if needed, but for local extension use it might be fine directly
+          // or converted to data URL by background (but we passed srcUrl).
+          // If it's a web URL, we might face CORS in canvas.
+          img.crossOrigin = "anonymous";
+          img.src = imgUrl;
+        }
+      });
+    }
+  }, []);
 
   // Independent state for rows (y-coords) and cols (x-coords)
   const [rowSplits, setRowSplits] = useState<number[]>([]);
@@ -195,26 +230,9 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="h-screen overflow-hidden bg-slate-950 text-slate-200 flex flex-col">
+    <div className="h-screen w-screen overflow-hidden bg-slate-950 text-slate-200 flex flex-col">
       {/* Header */}
-      <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-end gap-2">
-            <img src={logo} alt="SnapLab" className="w-12 h-12 rounded-lg" />
-            <h1 className="text-xl font-bold leading-none mb-2">
-              <span className="text-cyan-400">Snap</span>
-              <span className="text-purple-400">L</span>
-              <span className="text-orange-400">ab</span>
-            </h1>
-          </div>
-          <div className="text-sm text-slate-500">
-            Local Processing
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col p-4 relative">
+      <main className="flex-1 flex flex-col relative w-full h-full">
         {loadingMessage && <LoadingOverlay message={loadingMessage} />}
 
         <div className="flex-1 flex flex-col items-center justify-center w-full">
@@ -229,7 +247,7 @@ const App: React.FC = () => {
                   </span>
                 </h2>
                 <p className="text-lg text-slate-400 leading-relaxed">
-                  AI segmentation, background removal, cropping, resizing, and smart splitting.
+                  Smart cropping, resizing, and grid splitting.
                   Runs entirely in your browser — no uploads, no server costs.
                 </p>
               </div>

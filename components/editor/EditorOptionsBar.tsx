@@ -112,12 +112,12 @@ export const EditorOptionsBar: React.FC<EditorOptionsBarProps> = ({
     onApplySamMask
 }) => {
     return (
-        <div className="h-12 bg-slate-900 border-b border-slate-800 flex items-center px-4 relative z-40">
+        <div className="flex items-center gap-2 h-full w-full px-4 overflow-x-auto custom-scrollbar">
             {/* Cancel button on the left when mode is active */}
             {mode && (
                 <button
                     onClick={onCancel}
-                    className="flex items-center gap-1 px-2 py-1 text-sm text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors mr-4"
+                    className="flex-none flex items-center gap-1 px-2 py-1 text-sm text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors border-r border-slate-700 pr-3 mr-1"
                     title="Cancel (Esc)"
                 >
                     <X className="w-4 h-4" />
@@ -126,7 +126,7 @@ export const EditorOptionsBar: React.FC<EditorOptionsBarProps> = ({
             )}
 
             {/* Options content centered */}
-            <div className="flex-1 flex items-center justify-center">
+            <div className="flex-1 flex items-center justify-start min-w-0">
                 {mode === 'CROP' && (
                     <CropOptions
                         onSetAspect={onSetCropAspect}
@@ -200,14 +200,11 @@ export const EditorOptionsBar: React.FC<EditorOptionsBarProps> = ({
                 )}
 
                 {!mode && (
-                    <span className="text-xs text-slate-500">Select a tool to start editing</span>
+                    <span className="text-xs text-slate-500">Select a tool from the sidebar</span>
                 )}
             </div>
 
-            {/* Spacer for symmetry when mode is active */}
-            {mode && <div className="w-20"></div>}
+            <div className="w-4"></div>
         </div>
     );
 };
-
-

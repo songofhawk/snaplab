@@ -1,0 +1,36 @@
+{
+    "manifest_version": 3,
+    "name": "Aimage Partner",
+    "version": "1.0.1",
+    "description": "Smart image cropping, grid splitting, and editing directly in your browser.",
+    "action": {
+        "default_title": "Open Aimage Partner",
+        "default_icon": {
+            "16": "icon-16.png",
+            "48": "icon-48.png",
+            "128": "icon-128.png"
+        }
+    },
+    "icons": {
+        "16": "icon-16.png",
+        "48": "icon-48.png",
+        "128": "icon-128.png"
+    },
+    "background": {
+        "service_worker": "src/background.ts",
+        "type": "module"
+    },
+    "permissions": [
+        "sidePanel",
+        "activeTab",
+        "contextMenus",
+        "downloads",
+        "storage"
+    ],
+    "side_panel": {
+        "default_path": "index.html"
+    },
+    "content_security_policy": {
+        "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+    }
+}

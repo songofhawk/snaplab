@@ -57,143 +57,147 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
         }`;
 
     return (
-        <div className="h-16 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between px-4">
-            <div className="flex items-center gap-4">
-                {onChangeImage && (
-                    <button
-                        onClick={onChangeImage}
-                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-                        title="Change Image"
-                    >
-                        <ImagePlus className="w-5 h-5" />
-                    </button>
-                )}
-                <h2 className="text-xl font-bold text-white">Edit</h2>
-                <div className="h-6 w-px bg-slate-700"></div>
+        <div className="flex flex-col h-full w-full items-center py-4 gap-4 overflow-y-auto custom-scrollbar">
+            {/* Logo/Home or Change Image */}
+            {onChangeImage && (
+                <button
+                    onClick={onChangeImage}
+                    className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                    title="Change Image"
+                >
+                    <ImagePlus className="w-5 h-5" />
+                </button>
+            )}
 
-                <div className="flex gap-1">
-                    {/* Basic Tools */}
-                    <button
-                        onClick={() => toggleMode('CROP')}
-                        className={toolButtonClass('CROP')}
-                        title="Crop"
-                    >
-                        <CropIcon className="w-5 h-5" />
-                    </button>
-                    <button
-                        onClick={() => toggleMode('RESIZE')}
-                        className={toolButtonClass('RESIZE')}
-                        title="Resize"
-                    >
-                        <Scan className="w-5 h-5" />
-                    </button>
+            <div className="w-8 h-px bg-slate-700"></div>
 
-                    <div className="h-6 w-px bg-slate-700 mx-2 self-center"></div>
-
-                    {/* Transform */}
-                    <button
-                        onClick={onRotate}
-                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-                        title="Rotate 90°"
-                    >
-                        <RotateCw className="w-5 h-5" />
-                    </button>
-                    <button
-                        onClick={onFlipHorizontal}
-                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-                        title="Flip Horizontal"
-                    >
-                        <FlipHorizontal className="w-5 h-5" />
-                    </button>
-
-                    <div className="h-6 w-px bg-slate-700 mx-2 self-center"></div>
-
-                    {/* Drawing / Erasing */}
-                    <button
-                        onClick={() => toggleMode('ANNOTATE')}
-                        className={toolButtonClass('ANNOTATE')}
-                        title="Draw"
-                    >
-                        <Pen className="w-5 h-5" />
-                    </button>
-                    <button
-                        onClick={() => toggleMode('TEXT')}
-                        className={toolButtonClass('TEXT')}
-                        title="Add Text"
-                    >
-                        <Type className="w-5 h-5" />
-                    </button>
-                    <button
-                        onClick={() => toggleMode('PIXEL_EDIT')}
-                        className={toolButtonClass('PIXEL_EDIT')}
-                        title="Pixel Eraser"
-                    >
-                        <Eraser className="w-5 h-5" />
-                    </button>
-                    <button
-                        onClick={() => toggleMode('BACKGROUND')}
-                        className={toolButtonClass('BACKGROUND')}
-                        title="Background Removal"
-                    >
-                        <ImageOff className="w-5 h-5" />
-                    </button>
-                    <button
-                        onClick={() => toggleMode('SEGMENT')}
-                        className={toolButtonClass('SEGMENT')}
-                        title="Segment Anything"
-                    >
-                        <Target className="w-5 h-5" />
-                    </button>
-
-                    <div className="h-6 w-px bg-slate-700 mx-2 self-center"></div>
-
-                    {/* Actions */}
-                    <button
-                        onClick={onSplit}
-                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-                        title="Split"
-                    >
-                        <Grid className="w-5 h-5" />
-                    </button>
-
-                    <div className="h-6 w-px bg-slate-700 mx-2 self-center"></div>
-
-                    <button
-                        onClick={onCopy}
-                        disabled={isLoading}
-                        className={`p-2 rounded-lg transition-colors ${isLoading
-                            ? 'text-slate-600 cursor-not-allowed'
-                            : 'text-slate-400 hover:text-white hover:bg-slate-800'
-                        }`}
-                        title="Copy to Clipboard"
-                    >
-                        <Copy className="w-5 h-5" />
-                    </button>
-                    <button
-                        onClick={onDownload}
-                        disabled={isLoading}
-                        className={`p-2 rounded-lg transition-colors ${isLoading
-                            ? 'text-slate-600 cursor-not-allowed'
-                            : 'text-slate-400 hover:text-white hover:bg-slate-800'
-                        }`}
-                        title="Download"
-                    >
-                        <Download className="w-5 h-5" />
-                    </button>
-                </div>
+            <div className="flex flex-col gap-2 w-full items-center">
+                {/* Basic Tools */}
+                <button
+                    onClick={() => toggleMode('CROP')}
+                    className={toolButtonClass('CROP')}
+                    title="Crop"
+                >
+                    <CropIcon className="w-5 h-5" />
+                </button>
+                <button
+                    onClick={() => toggleMode('RESIZE')}
+                    className={toolButtonClass('RESIZE')}
+                    title="Resize"
+                >
+                    <Scan className="w-5 h-5" />
+                </button>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="w-8 h-px bg-slate-700"></div>
+
+            <div className="flex flex-col gap-2 w-full items-center">
+                {/* Transform */}
+                <button
+                    onClick={onRotate}
+                    className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                    title="Rotate 90°"
+                >
+                    <RotateCw className="w-5 h-5" />
+                </button>
+                <button
+                    onClick={onFlipHorizontal}
+                    className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                    title="Flip Horizontal"
+                >
+                    <FlipHorizontal className="w-5 h-5" />
+                </button>
+            </div>
+
+            <div className="w-8 h-px bg-slate-700"></div>
+
+            <div className="flex flex-col gap-2 w-full items-center">
+                {/* Drawing / Erasing */}
+                <button
+                    onClick={() => toggleMode('ANNOTATE')}
+                    className={toolButtonClass('ANNOTATE')}
+                    title="Draw"
+                >
+                    <Pen className="w-5 h-5" />
+                </button>
+                <button
+                    onClick={() => toggleMode('TEXT')}
+                    className={toolButtonClass('TEXT')}
+                    title="Add Text"
+                >
+                    <Type className="w-5 h-5" />
+                </button>
+                <button
+                    onClick={() => toggleMode('PIXEL_EDIT')}
+                    className={toolButtonClass('PIXEL_EDIT')}
+                    title="Pixel Eraser"
+                >
+                    <Eraser className="w-5 h-5" />
+                </button>
+                <button
+                    onClick={() => toggleMode('BACKGROUND')}
+                    className={toolButtonClass('BACKGROUND')}
+                    title="Background Removal"
+                >
+                    <ImageOff className="w-5 h-5" />
+                </button>
+                <button
+                    onClick={() => toggleMode('SEGMENT')}
+                    className={toolButtonClass('SEGMENT')}
+                    title="Segment Anything"
+                >
+                    <Target className="w-5 h-5" />
+                </button>
+            </div>
+
+            <div className="w-8 h-px bg-slate-700"></div>
+
+            <div className="flex flex-col gap-2 w-full items-center">
+                {/* Actions */}
+                <button
+                    onClick={onSplit}
+                    className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                    title="Split"
+                >
+                    <Grid className="w-5 h-5" />
+                </button>
+            </div>
+
+            <div className="flex-1"></div> {/* Spacer to push bottom items down */}
+
+            <div className="flex flex-col gap-2 w-full items-center pb-4">
                 <button
                     onClick={onUndo}
                     disabled={(currentStep === 0 && !canvasModified) || isLoading}
-                    className={`p-2 rounded-lg transition-colors flex items-center gap-2 ${(currentStep === 0 && !canvasModified)
+                    className={`p-2 rounded-lg transition-colors flex items-center justify-center ${(currentStep === 0 && !canvasModified)
                         ? 'text-slate-600 cursor-not-allowed'
                         : 'text-slate-300 hover:text-white hover:bg-slate-800'
-                    }`}
+                        }`}
                     title="Undo"
                 >
                     <Undo2 className="w-5 h-5" />
+                </button>
+                <button
+                    onClick={onCopy}
+                    disabled={isLoading}
+                    className={`p-2 rounded-lg transition-colors flex items-center justify-center ${isLoading
+                        ? 'text-slate-600 cursor-not-allowed'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                        }`}
+                    title="Copy to Clipboard"
+                >
+                    <Copy className="w-5 h-5" />
+                </button>
+                <button
+                    onClick={onDownload}
+                    disabled={isLoading}
+                    className={`p-2 rounded-lg transition-colors flex items-center justify-center ${isLoading
+                        ? 'text-slate-600 cursor-not-allowed'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                        }`}
+                    title="Download"
+                >
+                    <Download className="w-5 h-5" />
                 </button>
             </div>
         </div>

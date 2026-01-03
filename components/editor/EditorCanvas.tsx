@@ -69,7 +69,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
             <div
                 className="relative shadow-2xl"
                 style={{
-                    cursor: isPanning ? 'grabbing' : (mode === 'PIXEL_EDIT' ? 'crosshair' : (mode === 'TEXT' ? 'text' : 'default')),
+                    cursor: isPanning ? 'grabbing' : (mode === 'PIXEL_EDIT' ? 'crosshair' : (mode === 'TEXT' ? 'default' : 'default')),
                     backgroundImage: `
                         linear-gradient(45deg, #808080 25%, transparent 25%),
                         linear-gradient(-45deg, #808080 25%, transparent 25%),
